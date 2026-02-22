@@ -703,8 +703,12 @@
 
       function notifyBrowserFinished() {
         const timerName = (nameInput.value || "").trim();
-        const title = timerName ? `Timer done: ${timerName}` : `Timer done (#${id})`;
-        showBrowserNotification(title, "Finished.");
+
+        const title = timerName
+          ? timerName
+          : "Timer";
+
+        showBrowserNotification(title, "");
       }
 
       function computeRunningSeconds() {
