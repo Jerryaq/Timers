@@ -23,6 +23,11 @@
       font-size: 15px;
     }
 
+    button {
+      font-family: Arial, sans-serif;
+      font-size: 15px;
+    }
+
     /* Remove number input spinners */
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button {
@@ -46,9 +51,6 @@
       margin-bottom: 5px;
       user-select: none;
       flex-wrap: nowrap; /* desktop unchanged */
-
-      /* IMPORTANT: helps pointer-drag on phones (prevents scroll/zoom while dragging) */
-      touch-action: none;
     }
 
     .display {
@@ -81,6 +83,15 @@
       margin: 0;
     }
 
+    .session-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+      margin-bottom: 10px;
+      user-select: none;
+      flex-wrap: nowrap;
+    }
+
     /* ---------------- MOBILE ---------------- */
     @media (max-width: 700px) {
 
@@ -101,7 +112,7 @@
       }
 
       /* prevent iOS zoom */
-      input {
+      input, button {
         font-size: 16px;
       }
     }
@@ -109,12 +120,18 @@
 </head>
 <body>
 
+  <div class="session-row">
+    <input class="name" id="sessionCode" type="text" placeholder="Session code">
+    <button id="exportBtn" type="button">Export</button>
+    <button id="importBtn" type="button">Import</button>
+  </div>
+
   <div id="timers"></div>
 
   <script>
     const timersContainer = document.getElementById("timers");
 
-    const STORAGE_KEY = "random_timers_v1_25";
+    const STORAGE_KEY_BASE = "random_timers_v1_25";
     const TIMER_COUNT = 25;
 
     const MAX_HOURS = 99;
@@ -122,6 +139,15 @@
     const MAX_SECONDS = 59;
     const MAX_SOUNDS = 99;
     const MAX_DELAY = 99;
+
+    function sanitizeSessionCode(s) {
+      return (s || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
+    }
+
+    function getSessionKey() {
+      const code = sanitizeSessionCode(localStorage.getItem(STORAGE_KEY_BASE + "_session") || "");
+      return STORAGE_KEY_BASE + (code ? ("__" + code) : "");
+    }
 
     function playNotificationSoundOnce() {
       const audio = new Audio("notification.wav");
@@ -273,24 +299,10 @@
       el.addEventListener("blur", fix);
     }
 
-    // -------------------- DRAG & DROP (DESKTOP + MOBILE) --------------------
+    // -------------------- DRAG & DROP (RAW) --------------------
     let draggingId = null;
 
-    function moveRowByIds(dragId, targetId) {
-      const draggingRow = timersContainer.querySelector(`.timer-row[data-item-id="${dragId}"]`);
-      const targetRow = timersContainer.querySelector(`.timer-row[data-item-id="${targetId}"]`);
-      if (!draggingRow || !targetRow) return;
-
-      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
-      const dragIndex = rows.indexOf(draggingRow);
-      const targetIndex = rows.indexOf(targetRow);
-
-      if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
-      else timersContainer.insertBefore(draggingRow, targetRow);
-    }
-
     function enableDragDrop(row) {
-      // ----- DESKTOP HTML5 DnD -----
       row.draggable = true;
 
       row.addEventListener("dragstart", (e) => {
@@ -319,51 +331,18 @@
         const targetId = Number(row.dataset.itemId);
         if (targetId === draggingId) return;
 
-        moveRowByIds(draggingId, targetId);
+        const draggingRow = timersContainer.querySelector(`.timer-row[data-item-id="${draggingId}"]`);
+        const targetRow = timersContainer.querySelector(`.timer-row[data-item-id="${targetId}"]`);
+        if (!draggingRow || !targetRow) return;
+
+        const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+        const dragIndex = rows.indexOf(draggingRow);
+        const targetIndex = rows.indexOf(targetRow);
+
+        if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
+        else timersContainer.insertBefore(draggingRow, targetRow);
+
         saveOrderFromDOM();
-      });
-
-      // ----- MOBILE: POINTER DRAG -----
-      let pointerActive = false;
-
-      row.addEventListener("pointerdown", (e) => {
-        if (e.target && e.target.tagName === "INPUT") return;
-
-        pointerActive = true;
-        draggingId = Number(row.dataset.itemId);
-
-        row.setPointerCapture(e.pointerId);
-        e.preventDefault();
-      });
-
-      row.addEventListener("pointermove", (e) => {
-        if (!pointerActive || draggingId === null) return;
-
-        const el = document.elementFromPoint(e.clientX, e.clientY);
-        if (!el) return;
-
-        const targetRow = el.closest(".timer-row");
-        if (!targetRow) return;
-
-        const targetId = Number(targetRow.dataset.itemId);
-        if (!targetId || targetId === draggingId) return;
-
-        moveRowByIds(draggingId, targetId);
-      });
-
-      row.addEventListener("pointerup", (e) => {
-        if (!pointerActive) return;
-
-        pointerActive = false;
-        row.releasePointerCapture(e.pointerId);
-
-        if (draggingId !== null) saveOrderFromDOM();
-        draggingId = null;
-      });
-
-      row.addEventListener("pointercancel", () => {
-        pointerActive = false;
-        draggingId = null;
       });
     }
 
@@ -382,7 +361,7 @@
     }
 
     function loadState() {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(getSessionKey());
       if (!raw) return null;
 
       try {
@@ -395,7 +374,7 @@
     }
 
     function saveState(items) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      localStorage.setItem(getSessionKey(), JSON.stringify(items));
     }
 
     function defaultItem(id) {
@@ -948,6 +927,55 @@
       };
     }
 
+    // --------- Session UI wiring ---------
+    const sessionInput = document.getElementById("sessionCode");
+    const exportBtn = document.getElementById("exportBtn");
+    const importBtn = document.getElementById("importBtn");
+
+    function reloadTimersForSession() {
+      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i]._cleanup) rows[i]._cleanup();
+      }
+      timersContainer.innerHTML = "";
+
+      items = ensureState();
+
+      for (let i = 0; i < items.length; i++) {
+        createRandomTimerRow(items[i]);
+      }
+    }
+
+    sessionInput.value = sanitizeSessionCode(localStorage.getItem(STORAGE_KEY_BASE + "_session") || "");
+
+    sessionInput.addEventListener("input", () => {
+      const clean = sanitizeSessionCode(sessionInput.value);
+      sessionInput.value = clean;
+      localStorage.setItem(STORAGE_KEY_BASE + "_session", clean);
+      reloadTimersForSession();
+    });
+
+    exportBtn.addEventListener("click", async () => {
+      const data = localStorage.getItem(getSessionKey()) || "[]";
+      await navigator.clipboard.writeText(data);
+      alert("Copied timers to clipboard.");
+    });
+
+    importBtn.addEventListener("click", () => {
+      const text = prompt("Paste timers JSON here:");
+      if (!text) return;
+
+      try {
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed)) throw new Error("Not an array");
+        localStorage.setItem(getSessionKey(), JSON.stringify(parsed));
+        reloadTimersForSession();
+      } catch {
+        alert("Invalid JSON.");
+      }
+    });
+
+    // --------- Initial render ---------
     for (let i = 0; i < items.length; i++) {
       createRandomTimerRow(items[i]);
     }
