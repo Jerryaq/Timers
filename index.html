@@ -151,6 +151,76 @@
     const MAX_SOUNDS = 99;
     const MAX_DELAY = 99;
 
+    // ---- Sound + Notification (GitHub Pages friendly) ----
+    // IMPORTANT: Put "notification.wav" next to this HTML file (same exact lowercase name).
+    const SOUND_URL = new URL("notification.wav", document.baseURI).href;
+
+    let audioUnlocked = false;
+    let audioCtx = null;
+
+    function unlockAudioOnce() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+
+      // Unlock WebAudio (helps iOS/Safari + autoplay rules)
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) {
+          audioCtx = new Ctx();
+          audioCtx.resume().catch(() => {});
+          const buf = audioCtx.createBuffer(1, 1, 22050);
+          const src = audioCtx.createBufferSource();
+          src.buffer = buf;
+          src.connect(audioCtx.destination);
+          src.start(0);
+        }
+      } catch {}
+
+      // Preload sound (best effort)
+      try {
+        const a = new Audio(SOUND_URL);
+        a.volume = 0.001;
+        a.play().then(() => {
+          a.pause();
+          a.currentTime = 0;
+        }).catch(() => {});
+      } catch {}
+
+      // Ask notification permission on first interaction (best effort)
+      ensureNotificationPermission();
+    }
+
+    // Any user gesture will unlock audio + allow notifications
+    document.addEventListener("pointerdown", unlockAudioOnce, { once: true });
+    document.addEventListener("keydown", unlockAudioOnce, { once: true });
+
+    function ensureNotificationPermission() {
+      if (!("Notification" in window)) return;
+      if (!window.isSecureContext) return; // Notifications require HTTPS or localhost
+      if (Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+
+    function showBrowserNotification(title, body) {
+      if (!("Notification" in window)) return;
+      if (!window.isSecureContext) return;
+      if (Notification.permission !== "granted") return;
+
+      try {
+        new Notification(title, { body });
+      } catch {}
+    }
+
+    function playNotificationSoundOnce() {
+      // If not unlocked yet, browsers may block play(); user gesture should unlock.
+      try {
+        const audio = new Audio(SOUND_URL);
+        audio.volume = 0.75;
+        audio.play().catch(() => {});
+      } catch {}
+    }
+
     function sanitizeSessionCode(s) {
       return (s || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
     }
@@ -206,12 +276,6 @@
       }
 
       return out;
-    }
-
-    function playNotificationSoundOnce() {
-      const audio = new Audio("notification.wav");
-      audio.volume = 0.75;
-      audio.play().catch(() => {});
     }
 
     function pad2(n) {
@@ -637,6 +701,12 @@
         }
       }
 
+      function notifyBrowserFinished() {
+        const timerName = (nameInput.value || "").trim();
+        const title = timerName ? `Timer done: ${timerName}` : `Timer done (#${id})`;
+        showBrowserNotification(title, "Finished.");
+      }
+
       function computeRunningSeconds() {
         const elapsed = Math.floor((Date.now() - runningStartAt) / 1000);
         return Math.max(0, runningBaseSeconds - elapsed);
@@ -734,7 +804,12 @@
           totalSeconds = 0;
           render();
 
-          if (notifyCb.checked) scheduleNotificationSounds();
+          // Notify (sound + browser notification)
+          if (notifyCb.checked) {
+            ensureNotificationPermission();
+            scheduleNotificationSounds();
+            notifyBrowserFinished();
+          }
 
           const aBlank = isABlank();
           const bBlank = isBBlank();
@@ -790,6 +865,9 @@
       function startRunning() {
         stopInterval();
         clearAllSoundTimers();
+
+        // Best effort: unlock audio on run click
+        unlockAudioOnce();
 
         if (!hasStarted) {
           const bothSet = !isABlank() && !isBBlank();
@@ -939,7 +1017,13 @@
       armOneShotCheckbox(clearCb, clearTimer);
 
       loopCb.addEventListener("change", () => snapshot(intervalId !== null ? "running" : "idle"));
-      notifyCb.addEventListener("change", () => snapshot(intervalId !== null ? "running" : "idle"));
+
+      notifyCb.addEventListener("change", () => {
+        // Ask permission when user enables notifications
+        if (notifyCb.checked) ensureNotificationPermission();
+        snapshot(intervalId !== null ? "running" : "idle");
+      });
+
       intervalCb.addEventListener("change", () => {
         intervalPhase = "A";
         snapshot(intervalId !== null ? "running" : "idle");
