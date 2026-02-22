@@ -160,6 +160,54 @@
       return STORAGE_KEY_BASE + (code ? ("__" + code) : "");
     }
 
+    // --------- Drag order persistence ---------
+    function getOrderKey() {
+      return getSessionKey() + "__order";
+    }
+
+    function loadOrder() {
+      const raw = localStorage.getItem(getOrderKey());
+      if (!raw) return null;
+
+      try {
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return null;
+        return arr.map(Number).filter((n) => Number.isFinite(n));
+      } catch {
+        return null;
+      }
+    }
+
+    function saveOrder(orderIds) {
+      localStorage.setItem(getOrderKey(), JSON.stringify(orderIds));
+    }
+
+    function applyOrder(itemsArr) {
+      const order = loadOrder();
+      if (!order || order.length === 0) return itemsArr;
+
+      const byId = new Map();
+      for (let i = 0; i < itemsArr.length; i++) byId.set(itemsArr[i].id, itemsArr[i]);
+
+      const out = [];
+      const used = new Set();
+
+      for (let i = 0; i < order.length; i++) {
+        const it = byId.get(order[i]);
+        if (it && !used.has(it.id)) {
+          out.push(it);
+          used.add(it.id);
+        }
+      }
+
+      for (let i = 0; i < itemsArr.length; i++) {
+        const it = itemsArr[i];
+        if (!used.has(it.id)) out.push(it);
+      }
+
+      return out;
+    }
+
     function playNotificationSoundOnce() {
       const audio = new Audio("notification.wav");
       audio.volume = 0.75;
@@ -360,14 +408,19 @@
     function saveOrderFromDOM() {
       const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
       const newOrder = [];
+      const orderIds = [];
 
       for (let i = 0; i < rows.length; i++) {
         const id = Number(rows[i].dataset.itemId);
         const item = getItemById(id);
-        if (item) newOrder.push(item);
+        if (item) {
+          newOrder.push(item);
+          orderIds.push(id);
+        }
       }
 
       items = newOrder;
+      saveOrder(orderIds);
       saveState(items);
     }
 
@@ -435,14 +488,15 @@
       const stored = loadState();
 
       if (!stored) {
-        const fresh = [];
+        let fresh = [];
         for (let i = 0; i < TIMER_COUNT; i++) fresh.push(defaultItem(i + 1));
+        fresh = applyOrder(fresh);
         saveState(fresh);
         return fresh;
       }
 
       const seen = new Set();
-      const out = [];
+      let out = [];
 
       for (let i = 0; i < stored.length; i++) {
         const it = stored[i];
@@ -462,6 +516,7 @@
         if (!seen.has(id)) out.push(defaultItem(id));
       }
 
+      out = applyOrder(out);
       saveState(out);
       return out;
     }
@@ -485,6 +540,7 @@
       }
     }
 
+    // -------------------- TIMER ROWS --------------------
     function createRandomTimerRow(data) {
       const id = data.id;
 
@@ -572,7 +628,7 @@
         if (ns.count <= 0) return;
 
         for (let i = 0; i < ns.count; i++) {
-          const ms = Math.round(i * ns.delay * 1000); // first beep instantly
+          const ms = Math.round(i * ns.delay * 1000);
           const t = setTimeout(() => {
             if (!alive) return;
             playNotificationSoundOnce();
@@ -684,7 +740,6 @@
           const bBlank = isBBlank();
           const bothSet = !aBlank && !bBlank;
 
-          // Interval mode: A -> B -> (A -> B ... if loop)
           if (intervalCb.checked && bothSet) {
             if (intervalPhase === "A") {
               intervalPhase = "B";
@@ -698,7 +753,6 @@
                 return;
               }
             } else {
-              // Just finished B
               if (loopCb.checked) {
                 intervalPhase = "A";
                 const next = getASeconds();
@@ -717,7 +771,6 @@
             return;
           }
 
-          // Normal mode: random A<->B only when looping
           if (loopCb.checked) {
             const next = pickSecondsRandom();
             if (next > 0) {
@@ -988,6 +1041,12 @@
         const parsed = JSON.parse(text);
         if (!Array.isArray(parsed)) throw new Error("Not an array");
         localStorage.setItem(getSessionKey(), JSON.stringify(parsed));
+
+        // also store order if present from current DOM after import
+        const ids = [];
+        for (let i = 0; i < parsed.length; i++) ids.push(Number(parsed[i].id));
+        saveOrder(ids);
+
         importBox.value = "";
         renderAllTimers();
         alert("Imported.");
