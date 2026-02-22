@@ -1,0 +1,907 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Timers</title>
+
+  <style>
+    :root {
+      --displayw: 80px;
+      --gap: 5px;
+      --indent: calc(var(--displayw) + (2 * var(--gap)));
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 15px;
+      margin: 5px;
+    }
+
+    input {
+      font-family: Arial, sans-serif;
+      font-size: 15px;
+    }
+
+    /* Remove number input spinners */
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+
+    #timers {
+      overflow-x: visible;
+    }
+
+    .timer-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+      margin-bottom: 5px;
+      user-select: none;
+      flex-wrap: nowrap; /* desktop unchanged */
+    }
+
+    .display {
+      font-size: 20px;
+      margin-right: var(--gap);
+      min-width: var(--displayw);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .name {
+      width: 100px;
+      box-sizing: border-box;
+    }
+
+    .num {
+      width: 25px;
+      box-sizing: border-box;
+    }
+
+    .delay {
+      width: 37.5px;
+      box-sizing: border-box;
+    }
+
+    .cb {
+      width: 25px;
+      height: 25px;
+      margin: 0;
+    }
+
+    /* ---------------- MOBILE ---------------- */
+    @media (max-width: 700px) {
+
+      .timer-row {
+        flex-wrap: wrap;
+
+        /* indent wrapped rows so they align with name */
+        padding-left: var(--indent);
+      }
+
+      .display {
+        /* pull display back to the far left */
+        margin-left: calc(-1 * var(--indent));
+      }
+
+      .name {
+        flex: 1 1 140px;
+      }
+
+      /* prevent iOS zoom */
+      input {
+        font-size: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="timers"></div>
+
+  <script>
+    const timersContainer = document.getElementById("timers");
+
+    const STORAGE_KEY = "random_timers_v1_25";
+    const TIMER_COUNT = 25;
+
+    const MAX_HOURS = 99;
+    const MAX_MINUTES = 59;
+    const MAX_SECONDS = 59;
+    const MAX_SOUNDS = 99;
+    const MAX_DELAY = 99;
+
+    function playNotificationSoundOnce() {
+      const audio = new Audio("notification.wav");
+      audio.volume = 0.75;
+      audio.play().catch(() => {});
+    }
+
+    function pad2(n) {
+      return String(n).padStart(2, "0");
+    }
+
+    function formatHMSFixed(totalSeconds) {
+      const t = Math.max(0, Math.floor(totalSeconds));
+      const h = Math.floor(t / 3600);
+      const m = Math.floor((t % 3600) / 60);
+      const s = t % 60;
+      const hh = (h < 100) ? pad2(h) : String(h);
+      return hh + ":" + pad2(m) + ":" + pad2(s);
+    }
+
+    function blankIfZeroNumberInput(el, value) {
+      if (value === 0) el.value = "";
+      else el.value = value;
+    }
+
+    function readIntBlankZero(el, min, max) {
+      const raw = el.value;
+      const v = Number(raw === "" ? 0 : raw);
+      let out = Math.floor(v);
+      if (typeof min === "number") out = Math.max(min, out);
+      if (typeof max === "number") out = Math.min(max, out);
+      blankIfZeroNumberInput(el, out);
+      return out;
+    }
+
+    function readFloatBlankZero(el, min, max) {
+      const raw = el.value;
+      const v = Number(raw === "" ? 0 : raw);
+
+      let out = v;
+      if (typeof min === "number") out = Math.max(min, out);
+      if (typeof max === "number") out = Math.min(max, out);
+
+      out = Math.floor(out * 100) / 100;
+
+      blankIfZeroNumberInput(el, out);
+      return out;
+    }
+
+    function setInitialBlankZeroInt(el, v, max) {
+      const n = Math.max(0, Math.floor(Number(v || 0)));
+      const out = (typeof max === "number") ? Math.min(max, n) : n;
+      blankIfZeroNumberInput(el, out);
+    }
+
+    function setInitialBlankZeroFloat(el, v, max) {
+      const n = Math.max(0, Number(v || 0));
+      let out = (typeof max === "number") ? Math.min(max, n) : n;
+      out = Math.floor(out * 100) / 100;
+      blankIfZeroNumberInput(el, out);
+    }
+
+    function readHMS(hourEl, minEl, secEl) {
+      const h = readIntBlankZero(hourEl, 0, MAX_HOURS);
+      const m = readIntBlankZero(minEl, 0, MAX_MINUTES);
+      const s = readIntBlankZero(secEl, 0, MAX_SECONDS);
+      return h * 3600 + m * 60 + s;
+    }
+
+    function randomIntInclusive(a, b) {
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      return lo + Math.floor(Math.random() * (hi - lo + 1));
+    }
+
+    function readNotifySettings(countEl, delayEl) {
+      const rawCount = countEl.value;
+      const rawDelay = delayEl.value;
+
+      let count = Math.floor(Number(rawCount === "" ? 1 : rawCount));
+      let delay = Number(rawDelay === "" ? 0.25 : rawDelay);
+
+      count = Math.max(0, Math.min(MAX_SOUNDS, count));
+      delay = Math.max(0, Math.min(MAX_DELAY, delay));
+
+      delay = Math.floor(delay * 100) / 100;
+
+      if (rawCount !== "") blankIfZeroNumberInput(countEl, count);
+      if (rawDelay !== "") blankIfZeroNumberInput(delayEl, delay);
+
+      return { count, delay };
+    }
+
+    function setCheckboxChecked(cb, checked) {
+      cb.checked = Boolean(checked);
+    }
+
+    function armOneShotCheckbox(cb, action) {
+      cb.addEventListener("change", () => {
+        if (!cb.checked) return;
+        action();
+        cb.checked = false;
+      });
+    }
+
+    function blockNonNumericTyping(el, allowDot) {
+      el.addEventListener("keydown", (e) => {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        const okKeys = [
+          "Backspace", "Delete", "Tab", "Escape", "Enter",
+          "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"
+        ];
+        if (okKeys.includes(e.key)) return;
+
+        if (e.key >= "0" && e.key <= "9") return;
+        if (allowDot && e.key === ".") return;
+
+        if (e.key === "-") { e.preventDefault(); return; }
+
+        e.preventDefault();
+      });
+    }
+
+    function enforceTwoDecimals(el) {
+      function fix() {
+        let v = el.value;
+        if (v === "") return;
+
+        v = v.replace(/[^0-9.]/g, "");
+        const firstDot = v.indexOf(".");
+        if (firstDot !== -1) {
+          const before = v.slice(0, firstDot + 1);
+          const after = v.slice(firstDot + 1).replace(/\./g, "");
+          v = before + after;
+        }
+
+        const dot = v.indexOf(".");
+        if (dot !== -1) {
+          const a = v.slice(0, dot);
+          const b = v.slice(dot + 1, dot + 3);
+          v = a + "." + b;
+        }
+
+        el.value = v;
+      }
+
+      el.addEventListener("input", fix);
+      el.addEventListener("blur", fix);
+    }
+
+    // -------------------- DRAG & DROP (RAW) --------------------
+    let draggingId = null;
+
+    function enableDragDrop(row) {
+      row.draggable = true;
+
+      row.addEventListener("dragstart", (e) => {
+        if (e.target && e.target.tagName === "INPUT") {
+          e.preventDefault();
+          return;
+        }
+
+        draggingId = Number(row.dataset.itemId);
+        e.dataTransfer.effectAllowed = "move";
+      });
+
+      row.addEventListener("dragend", () => {
+        draggingId = null;
+      });
+
+      row.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      });
+
+      row.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (draggingId === null) return;
+
+        const targetId = Number(row.dataset.itemId);
+        if (targetId === draggingId) return;
+
+        const draggingRow = timersContainer.querySelector(`.timer-row[data-item-id="${draggingId}"]`);
+        const targetRow = timersContainer.querySelector(`.timer-row[data-item-id="${targetId}"]`);
+        if (!draggingRow || !targetRow) return;
+
+        const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+        const dragIndex = rows.indexOf(draggingRow);
+        const targetIndex = rows.indexOf(targetRow);
+
+        if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
+        else timersContainer.insertBefore(draggingRow, targetRow);
+
+        saveOrderFromDOM();
+      });
+    }
+
+    function saveOrderFromDOM() {
+      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+      const newOrder = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const id = Number(rows[i].dataset.itemId);
+        const item = getItemById(id);
+        if (item) newOrder.push(item);
+      }
+
+      items = newOrder;
+      saveState(items);
+    }
+
+    function loadState() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return null;
+        return parsed;
+      } catch {
+        return null;
+      }
+    }
+
+    function saveState(items) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    }
+
+    function defaultItem(id) {
+      return {
+        id: id,
+        type: "randomTimer",
+        name: "",
+        hA: 0, mA: 0, sA: 0,
+        hB: 0, mB: 0, sB: 0,
+        notifyCount: undefined,
+        notifyDelay: undefined,
+        totalSeconds: 0,
+        mode: "idle",
+        hasStarted: false,
+        loopEnabled: false,
+        notifyEnabled: false,
+        intervalEnabled: false,
+        intervalPhase: "A",
+        runningBaseSeconds: 0,
+        runningStartAt: 0
+      };
+    }
+
+    function clampSavedItem(item) {
+      const out = Object.assign(defaultItem(item.id), item);
+
+      out.hA = Math.min(MAX_HOURS, Math.max(0, Number(out.hA || 0)));
+      out.mA = Math.min(MAX_MINUTES, Math.max(0, Number(out.mA || 0)));
+      out.sA = Math.min(MAX_SECONDS, Math.max(0, Number(out.sA || 0)));
+
+      out.hB = Math.min(MAX_HOURS, Math.max(0, Number(out.hB || 0)));
+      out.mB = Math.min(MAX_MINUTES, Math.max(0, Number(out.mB || 0)));
+      out.sB = Math.min(MAX_SECONDS, Math.max(0, Number(out.sB || 0)));
+
+      if (out.notifyCount !== undefined) out.notifyCount = Math.min(MAX_SOUNDS, Math.max(0, Number(out.notifyCount || 0)));
+      if (out.notifyDelay !== undefined) out.notifyDelay = Math.min(MAX_DELAY, Math.max(0, Number(out.notifyDelay || 0)));
+
+      if (out.notifyDelay !== undefined) out.notifyDelay = Math.floor(Number(out.notifyDelay) * 100) / 100;
+
+      out.intervalEnabled = Boolean(out.intervalEnabled);
+      out.intervalPhase = (out.intervalPhase === "B") ? "B" : "A";
+
+      return out;
+    }
+
+    function ensureState() {
+      const stored = loadState();
+
+      if (!stored) {
+        const fresh = [];
+        for (let i = 0; i < TIMER_COUNT; i++) fresh.push(defaultItem(i + 1));
+        saveState(fresh);
+        return fresh;
+      }
+
+      const seen = new Set();
+      const out = [];
+
+      for (let i = 0; i < stored.length; i++) {
+        const it = stored[i];
+        if (!it || typeof it.id !== "number") continue;
+
+        const id = Number(it.id);
+        if (id < 1 || id > TIMER_COUNT) continue;
+        if (seen.has(id)) continue;
+
+        seen.add(id);
+        out.push(clampSavedItem(it));
+        if (out.length >= TIMER_COUNT) break;
+      }
+
+      for (let id = 1; id <= TIMER_COUNT; id++) {
+        if (out.length >= TIMER_COUNT) break;
+        if (!seen.has(id)) out.push(defaultItem(id));
+      }
+
+      saveState(out);
+      return out;
+    }
+
+    let items = ensureState();
+
+    function getItemById(id) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === id) return items[i];
+      }
+      return null;
+    }
+
+    function upsertItem(item) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === item.id) {
+          items[i] = item;
+          saveState(items);
+          return;
+        }
+      }
+    }
+
+    function createRandomTimerRow(data) {
+      const id = data.id;
+
+      const row = document.createElement("div");
+      row.className = "timer-row";
+      row.dataset.itemId = String(id);
+
+      row.innerHTML = `
+        <div class="display" id="rDisplay${id}">00:00:00</div>
+        <input class="name" id="rName${id}" type="text">
+        <input class="num" id="rHourA${id}" type="number" min="0" max="${MAX_HOURS}">
+        <input class="num" id="rMinA${id}" type="number" min="0" max="${MAX_MINUTES}">
+        <input class="num" id="rSecA${id}" type="number" min="0" max="${MAX_SECONDS}">
+        <input class="num" id="rHourB${id}" type="number" min="0" max="${MAX_HOURS}">
+        <input class="num" id="rMinB${id}" type="number" min="0" max="${MAX_MINUTES}">
+        <input class="num" id="rSecB${id}" type="number" min="0" max="${MAX_SECONDS}">
+        <input class="num" id="rNCount${id}" type="number" min="0" max="${MAX_SOUNDS}">
+        <input class="delay" id="rNDelay${id}" type="number" min="0" max="${MAX_DELAY}" step="0.01" inputmode="decimal">
+        <input class="cb" id="rRun${id}" type="checkbox">
+        <input class="cb" id="rReset${id}" type="checkbox">
+        <input class="cb" id="rNotify${id}" type="checkbox">
+        <input class="cb" id="rLoop${id}" type="checkbox">
+        <input class="cb" id="rInterval${id}" type="checkbox">
+        <input class="cb" id="rClear${id}" type="checkbox">
+      `;
+
+      timersContainer.appendChild(row);
+      enableDragDrop(row);
+
+      const display = document.getElementById(`rDisplay${id}`);
+      const nameInput = document.getElementById(`rName${id}`);
+
+      const hA = document.getElementById(`rHourA${id}`);
+      const mA = document.getElementById(`rMinA${id}`);
+      const sA = document.getElementById(`rSecA${id}`);
+
+      const hB = document.getElementById(`rHourB${id}`);
+      const mB = document.getElementById(`rMinB${id}`);
+      const sB = document.getElementById(`rSecB${id}`);
+
+      const nCountInput = document.getElementById(`rNCount${id}`);
+      const nDelayInput = document.getElementById(`rNDelay${id}`);
+
+      const runCb = document.getElementById(`rRun${id}`);
+      const resetCb = document.getElementById(`rReset${id}`);
+      const notifyCb = document.getElementById(`rNotify${id}`);
+      const loopCb = document.getElementById(`rLoop${id}`);
+      const intervalCb = document.getElementById(`rInterval${id}`);
+      const clearCb = document.getElementById(`rClear${id}`);
+
+      blockNonNumericTyping(hA, false);
+      blockNonNumericTyping(mA, false);
+      blockNonNumericTyping(sA, false);
+      blockNonNumericTyping(hB, false);
+      blockNonNumericTyping(mB, false);
+      blockNonNumericTyping(sB, false);
+      blockNonNumericTyping(nCountInput, false);
+      blockNonNumericTyping(nDelayInput, true);
+      enforceTwoDecimals(nDelayInput);
+
+      let totalSeconds = Number(data.totalSeconds || 0);
+      let intervalId = null;
+
+      let hasStarted = Boolean(data.hasStarted);
+      let intervalPhase = (data.intervalPhase === "B") ? "B" : "A";
+      let runningBaseSeconds = Number(data.runningBaseSeconds || 0);
+      let runningStartAt = Number(data.runningStartAt || 0);
+
+      let soundTimeoutIds = [];
+      let alive = true;
+
+      function render() {
+        display.textContent = formatHMSFixed(totalSeconds);
+      }
+
+      function clearAllSoundTimers() {
+        for (let i = 0; i < soundTimeoutIds.length; i++) clearTimeout(soundTimeoutIds[i]);
+        soundTimeoutIds = [];
+      }
+
+      function scheduleNotificationSounds() {
+        clearAllSoundTimers();
+
+        const ns = readNotifySettings(nCountInput, nDelayInput);
+        if (ns.count <= 0) return;
+
+        for (let i = 0; i < ns.count; i++) {
+          const ms = Math.round(i * ns.delay * 1000); // first beep instantly
+          const t = setTimeout(() => {
+            if (!alive) return;
+            playNotificationSoundOnce();
+          }, ms);
+          soundTimeoutIds.push(t);
+        }
+      }
+
+      function computeRunningSeconds() {
+        const elapsed = Math.floor((Date.now() - runningStartAt) / 1000);
+        return Math.max(0, runningBaseSeconds - elapsed);
+      }
+
+      function isABlank() {
+        return hA.value === "" && mA.value === "" && sA.value === "";
+      }
+
+      function isBBlank() {
+        return hB.value === "" && mB.value === "" && sB.value === "";
+      }
+
+      function getASeconds() {
+        return readHMS(hA, mA, sA);
+      }
+
+      function getBSeconds() {
+        return readHMS(hB, mB, sB);
+      }
+
+      function pickSecondsRandom() {
+        const aBlank = isABlank();
+        const bBlank = isBBlank();
+
+        if (!aBlank && bBlank) return getASeconds();
+        if (aBlank && !bBlank) return getBSeconds();
+        if (!aBlank && !bBlank) {
+          const a = getASeconds();
+          const b = getBSeconds();
+          return randomIntInclusive(a, b);
+        }
+
+        return 0;
+      }
+
+      function snapshot(mode) {
+        const item = getItemById(id);
+        if (!alive || !item) return;
+
+        const ns = readNotifySettings(nCountInput, nDelayInput);
+
+        item.name = nameInput.value || "";
+
+        item.hA = readIntBlankZero(hA, 0, MAX_HOURS);
+        item.mA = readIntBlankZero(mA, 0, MAX_MINUTES);
+        item.sA = readIntBlankZero(sA, 0, MAX_SECONDS);
+
+        item.hB = readIntBlankZero(hB, 0, MAX_HOURS);
+        item.mB = readIntBlankZero(mB, 0, MAX_MINUTES);
+        item.sB = readIntBlankZero(sB, 0, MAX_SECONDS);
+
+        item.notifyCount = (nCountInput.value === "") ? undefined : ns.count;
+        item.notifyDelay = (nDelayInput.value === "") ? undefined : ns.delay;
+
+        item.loopEnabled = loopCb.checked;
+        item.notifyEnabled = notifyCb.checked;
+        item.intervalEnabled = intervalCb.checked;
+        item.intervalPhase = intervalPhase;
+
+        item.totalSeconds = totalSeconds;
+        item.mode = mode;
+        item.hasStarted = hasStarted;
+        item.runningBaseSeconds = runningBaseSeconds;
+        item.runningStartAt = runningStartAt;
+
+        upsertItem(item);
+      }
+
+      function stopInterval() {
+        if (intervalId !== null) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+      }
+
+      function stopToIdle() {
+        stopInterval();
+        setCheckboxChecked(runCb, false);
+        hasStarted = false;
+        intervalPhase = "A";
+        runningBaseSeconds = 0;
+        runningStartAt = 0;
+        snapshot("idle");
+      }
+
+      function tick() {
+        if (!alive) return;
+
+        totalSeconds = computeRunningSeconds();
+        render();
+        snapshot("running");
+
+        if (totalSeconds <= 0) {
+          totalSeconds = 0;
+          render();
+
+          if (notifyCb.checked) scheduleNotificationSounds();
+
+          const aBlank = isABlank();
+          const bBlank = isBBlank();
+          const bothSet = !aBlank && !bBlank;
+
+          // Interval mode: A -> B -> (A -> B ... if loop)
+          if (intervalCb.checked && bothSet) {
+            if (intervalPhase === "A") {
+              intervalPhase = "B";
+              const next = getBSeconds();
+              if (next > 0) {
+                runningBaseSeconds = next;
+                runningStartAt = Date.now();
+                totalSeconds = next;
+                render();
+                snapshot("running");
+                return;
+              }
+            } else {
+              // Just finished B
+              if (loopCb.checked) {
+                intervalPhase = "A";
+                const next = getASeconds();
+                if (next > 0) {
+                  runningBaseSeconds = next;
+                  runningStartAt = Date.now();
+                  totalSeconds = next;
+                  render();
+                  snapshot("running");
+                  return;
+                }
+              }
+            }
+
+            stopToIdle();
+            return;
+          }
+
+          // Normal mode: random A<->B only when looping
+          if (loopCb.checked) {
+            const next = pickSecondsRandom();
+            if (next > 0) {
+              runningBaseSeconds = next;
+              runningStartAt = Date.now();
+              totalSeconds = next;
+              render();
+              snapshot("running");
+              return;
+            }
+          }
+
+          stopToIdle();
+        }
+      }
+
+      function startRunning() {
+        stopInterval();
+        clearAllSoundTimers();
+
+        if (!hasStarted) {
+          const bothSet = !isABlank() && !isBBlank();
+
+          let startSeconds = 0;
+
+          if (intervalCb.checked && bothSet) {
+            intervalPhase = "A";
+            startSeconds = getASeconds();
+          } else {
+            startSeconds = pickSecondsRandom();
+          }
+
+          totalSeconds = startSeconds;
+
+          if (totalSeconds <= 0) {
+            setCheckboxChecked(runCb, false);
+            return;
+          }
+
+          hasStarted = true;
+        } else {
+          if (totalSeconds <= 0) {
+            setCheckboxChecked(runCb, false);
+            return;
+          }
+        }
+
+        runningBaseSeconds = totalSeconds;
+        runningStartAt = Date.now();
+
+        setCheckboxChecked(runCb, true);
+        snapshot("running");
+
+        intervalId = setInterval(tick, 250);
+      }
+
+      function pauseRunning() {
+        totalSeconds = computeRunningSeconds();
+        stopInterval();
+        clearAllSoundTimers();
+
+        setCheckboxChecked(runCb, false);
+
+        runningBaseSeconds = totalSeconds;
+        runningStartAt = 0;
+
+        render();
+        snapshot("paused");
+      }
+
+      function reset() {
+        stopInterval();
+        clearAllSoundTimers();
+
+        totalSeconds = 0;
+        render();
+
+        setCheckboxChecked(runCb, false);
+        hasStarted = false;
+        intervalPhase = "A";
+        runningBaseSeconds = 0;
+        runningStartAt = 0;
+
+        snapshot("idle");
+      }
+
+      function clearTimer() {
+        const ok = confirm();
+        if (!ok) return;
+
+        stopInterval();
+        clearAllSoundTimers();
+
+        nameInput.value = "";
+
+        hA.value = "";
+        mA.value = "";
+        sA.value = "";
+
+        hB.value = "";
+        mB.value = "";
+        sB.value = "";
+
+        nCountInput.value = "";
+        nDelayInput.value = "";
+
+        setCheckboxChecked(runCb, false);
+        setCheckboxChecked(notifyCb, false);
+        setCheckboxChecked(loopCb, false);
+        setCheckboxChecked(intervalCb, false);
+
+        totalSeconds = 0;
+        render();
+
+        hasStarted = false;
+        intervalPhase = "A";
+        runningBaseSeconds = 0;
+        runningStartAt = 0;
+
+        snapshot("idle");
+      }
+
+      function onInputsChangedIdle() {
+        if (intervalId !== null) return;
+
+        clearAllSoundTimers();
+        totalSeconds = 0;
+        render();
+
+        setCheckboxChecked(runCb, false);
+        hasStarted = false;
+        intervalPhase = "A";
+        runningBaseSeconds = 0;
+        runningStartAt = 0;
+
+        snapshot("idle");
+      }
+
+      nameInput.value = data.name || "";
+
+      setInitialBlankZeroInt(hA, data.hA, MAX_HOURS);
+      setInitialBlankZeroInt(mA, data.mA, MAX_MINUTES);
+      setInitialBlankZeroInt(sA, data.sA, MAX_SECONDS);
+
+      setInitialBlankZeroInt(hB, data.hB, MAX_HOURS);
+      setInitialBlankZeroInt(mB, data.mB, MAX_MINUTES);
+      setInitialBlankZeroInt(sB, data.sB, MAX_SECONDS);
+
+      const c = (data.notifyCount === undefined) ? 0 : Number(data.notifyCount || 0);
+      const d = (data.notifyDelay === undefined) ? 0 : Number(data.notifyDelay || 0);
+      setInitialBlankZeroInt(nCountInput, c, MAX_SOUNDS);
+      setInitialBlankZeroFloat(nDelayInput, d, MAX_DELAY);
+
+      setCheckboxChecked(loopCb, Boolean(data.loopEnabled));
+      setCheckboxChecked(notifyCb, Boolean(data.notifyEnabled));
+      setCheckboxChecked(intervalCb, Boolean(data.intervalEnabled));
+
+      render();
+
+      runCb.addEventListener("change", () => {
+        if (runCb.checked) startRunning();
+        else pauseRunning();
+      });
+
+      armOneShotCheckbox(resetCb, reset);
+      armOneShotCheckbox(clearCb, clearTimer);
+
+      loopCb.addEventListener("change", () => snapshot(intervalId !== null ? "running" : "idle"));
+      notifyCb.addEventListener("change", () => snapshot(intervalId !== null ? "running" : "idle"));
+      intervalCb.addEventListener("change", () => {
+        intervalPhase = "A";
+        snapshot(intervalId !== null ? "running" : "idle");
+      });
+
+      nameInput.addEventListener("input", () => snapshot(intervalId !== null ? "running" : "idle"));
+
+      hA.addEventListener("input", onInputsChangedIdle);
+      mA.addEventListener("input", onInputsChangedIdle);
+      sA.addEventListener("input", onInputsChangedIdle);
+
+      hB.addEventListener("input", onInputsChangedIdle);
+      mB.addEventListener("input", onInputsChangedIdle);
+      sB.addEventListener("input", onInputsChangedIdle);
+
+      nCountInput.addEventListener("input", onInputsChangedIdle);
+      nDelayInput.addEventListener("input", onInputsChangedIdle);
+
+      hA.addEventListener("blur", () => readIntBlankZero(hA, 0, MAX_HOURS));
+      mA.addEventListener("blur", () => readIntBlankZero(mA, 0, MAX_MINUTES));
+      sA.addEventListener("blur", () => readIntBlankZero(sA, 0, MAX_SECONDS));
+
+      hB.addEventListener("blur", () => readIntBlankZero(hB, 0, MAX_HOURS));
+      mB.addEventListener("blur", () => readIntBlankZero(mB, 0, MAX_MINUTES));
+      sB.addEventListener("blur", () => readIntBlankZero(sB, 0, MAX_SECONDS));
+
+      nCountInput.addEventListener("blur", () => readIntBlankZero(nCountInput, 0, MAX_SOUNDS));
+      nDelayInput.addEventListener("blur", () => readFloatBlankZero(nDelayInput, 0, MAX_DELAY));
+
+      if (data.mode === "running" && typeof data.runningStartAt === "number" && typeof data.runningBaseSeconds === "number") {
+        runningBaseSeconds = Number(data.runningBaseSeconds || 0);
+        runningStartAt = Number(data.runningStartAt || Date.now());
+
+        totalSeconds = computeRunningSeconds();
+        render();
+
+        setCheckboxChecked(runCb, true);
+        intervalId = setInterval(tick, 250);
+      } else {
+        setCheckboxChecked(runCb, false);
+      }
+
+      snapshot(data.mode || "idle");
+
+      row._cleanup = () => {
+        alive = false;
+        stopInterval();
+        clearAllSoundTimers();
+      };
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      createRandomTimerRow(items[i]);
+    }
+  </script>
+
+</body>
+</html>
