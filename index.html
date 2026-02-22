@@ -46,6 +46,9 @@
       margin-bottom: 5px;
       user-select: none;
       flex-wrap: nowrap; /* desktop unchanged */
+
+      /* IMPORTANT: helps pointer-drag on phones (prevents scroll/zoom while dragging) */
+      touch-action: none;
     }
 
     .display {
@@ -270,10 +273,24 @@
       el.addEventListener("blur", fix);
     }
 
-    // -------------------- DRAG & DROP (RAW) --------------------
+    // -------------------- DRAG & DROP (DESKTOP + MOBILE) --------------------
     let draggingId = null;
 
+    function moveRowByIds(dragId, targetId) {
+      const draggingRow = timersContainer.querySelector(`.timer-row[data-item-id="${dragId}"]`);
+      const targetRow = timersContainer.querySelector(`.timer-row[data-item-id="${targetId}"]`);
+      if (!draggingRow || !targetRow) return;
+
+      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+      const dragIndex = rows.indexOf(draggingRow);
+      const targetIndex = rows.indexOf(targetRow);
+
+      if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
+      else timersContainer.insertBefore(draggingRow, targetRow);
+    }
+
     function enableDragDrop(row) {
+      // ----- DESKTOP HTML5 DnD -----
       row.draggable = true;
 
       row.addEventListener("dragstart", (e) => {
@@ -302,18 +319,51 @@
         const targetId = Number(row.dataset.itemId);
         if (targetId === draggingId) return;
 
-        const draggingRow = timersContainer.querySelector(`.timer-row[data-item-id="${draggingId}"]`);
-        const targetRow = timersContainer.querySelector(`.timer-row[data-item-id="${targetId}"]`);
-        if (!draggingRow || !targetRow) return;
-
-        const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
-        const dragIndex = rows.indexOf(draggingRow);
-        const targetIndex = rows.indexOf(targetRow);
-
-        if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
-        else timersContainer.insertBefore(draggingRow, targetRow);
-
+        moveRowByIds(draggingId, targetId);
         saveOrderFromDOM();
+      });
+
+      // ----- MOBILE: POINTER DRAG -----
+      let pointerActive = false;
+
+      row.addEventListener("pointerdown", (e) => {
+        if (e.target && e.target.tagName === "INPUT") return;
+
+        pointerActive = true;
+        draggingId = Number(row.dataset.itemId);
+
+        row.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+
+      row.addEventListener("pointermove", (e) => {
+        if (!pointerActive || draggingId === null) return;
+
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        if (!el) return;
+
+        const targetRow = el.closest(".timer-row");
+        if (!targetRow) return;
+
+        const targetId = Number(targetRow.dataset.itemId);
+        if (!targetId || targetId === draggingId) return;
+
+        moveRowByIds(draggingId, targetId);
+      });
+
+      row.addEventListener("pointerup", (e) => {
+        if (!pointerActive) return;
+
+        pointerActive = false;
+        row.releasePointerCapture(e.pointerId);
+
+        if (draggingId !== null) saveOrderFromDOM();
+        draggingId = null;
+      });
+
+      row.addEventListener("pointercancel", () => {
+        pointerActive = false;
+        draggingId = null;
       });
     }
 
