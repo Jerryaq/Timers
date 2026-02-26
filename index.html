@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <!-- disable zoom on mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Timers</title>
 
@@ -17,7 +16,6 @@
       font-family: Arial, sans-serif;
       font-size: 15px;
       margin: 5px;
-      touch-action: manipulation;
     }
 
     input, button, textarea {
@@ -74,16 +72,13 @@
       box-sizing: border-box;
     }
 
-    /* Native checkbox look (PC-friendly), still consistent size */
     .cb {
       width: 25px;
       height: 25px;
       margin: 0;
-      box-sizing: border-box;
-      accent-color: #8a8a8a;
     }
 
-    /* Session UI */
+    /* Session + Import UI */
     .session-row {
       display: flex;
       align-items: center;
@@ -108,13 +103,13 @@
         margin-left: calc(-1 * var(--indent));
       }
 
-      /* name boxes: 75px on mobile */
+      /* name boxes = 90px on mobile */
       .name {
-        width: 75px;
-        flex: 0 0 75px;
+        width: 90px;
+        flex: 0 0 90px;
       }
 
-      /* prevent iOS zoom from focusing inputs (still useful even with user-scalable=no) */
+      /* prevent iOS zoom */
       input, button, textarea {
         font-size: 16px;
       }
@@ -123,8 +118,9 @@
 </head>
 <body>
 
+  <!-- Session / Sharing UI -->
   <div class="session-row">
-    <input class="name" id="sessionCode" type="text" placeholder="Session code">
+    <input class="name" id="sessionCode" type="text" placeholder="">
     <input class="name" id="importBox" type="text" placeholder="">
     <input class="cb" id="importCb" type="checkbox">
     <input class="cb" id="exportCb" type="checkbox">
@@ -155,6 +151,7 @@
       if (audioUnlocked) return;
       audioUnlocked = true;
 
+      // Unlock WebAudio (helps iOS/Safari + autoplay rules)
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (Ctx) {
@@ -168,6 +165,7 @@
         }
       } catch {}
 
+      // Preload sound (best effort)
       try {
         const a = new Audio(SOUND_URL);
         a.volume = 0.001;
@@ -177,15 +175,17 @@
         }).catch(() => {});
       } catch {}
 
+      // Ask notification permission on first interaction (best effort)
       ensureNotificationPermission();
     }
 
+    // Any user gesture will unlock audio + allow notifications
     document.addEventListener("pointerdown", unlockAudioOnce, { once: true });
     document.addEventListener("keydown", unlockAudioOnce, { once: true });
 
     function ensureNotificationPermission() {
       if (!("Notification" in window)) return;
-      if (!window.isSecureContext) return;
+      if (!window.isSecureContext) return; // Notifications require HTTPS or localhost
       if (Notification.permission === "default") {
         Notification.requestPermission().catch(() => {});
       }
@@ -202,6 +202,7 @@
     }
 
     function playNotificationSoundOnce() {
+      // If not unlocked yet, browsers may block play(); user gesture should unlock.
       try {
         const audio = new Audio(SOUND_URL);
         audio.volume = 0.75;
@@ -218,6 +219,7 @@
       return STORAGE_KEY_BASE + (code ? ("__" + code) : "");
     }
 
+    // --------- Drag order persistence ---------
     function getOrderKey() {
       return getSessionKey() + "__order";
     }
@@ -690,7 +692,11 @@
 
       function notifyBrowserFinished() {
         const timerName = (nameInput.value || "").trim();
-        const title = timerName ? timerName : "Timer";
+
+        const title = timerName
+          ? timerName
+          : "Timer";
+
         showBrowserNotification(title, "");
       }
 
@@ -791,6 +797,7 @@
           totalSeconds = 0;
           render();
 
+          // Notify (sound + browser notification)
           if (notifyCb.checked) {
             ensureNotificationPermission();
             scheduleNotificationSounds();
@@ -852,10 +859,12 @@
         stopInterval();
         clearAllSoundTimers();
 
+        // Best effort: unlock audio on run click
         unlockAudioOnce();
 
         if (!hasStarted) {
           const bothSet = !isABlank() && !isBBlank();
+
           let startSeconds = 0;
 
           if (intervalCb.checked && bothSet) {
@@ -1003,6 +1012,7 @@
       loopCb.addEventListener("change", () => snapshot(intervalId !== null ? "running" : "idle"));
 
       notifyCb.addEventListener("change", () => {
+        // Ask permission when user enables notifications
         if (notifyCb.checked) ensureNotificationPermission();
         snapshot(intervalId !== null ? "running" : "idle");
       });
@@ -1092,7 +1102,7 @@
     armOneShotCheckbox(exportCb, async () => {
       const data = localStorage.getItem(getSessionKey()) || "[]";
       await navigator.clipboard.writeText(data);
-      alert("Copied timers JSON to clipboard.");
+      alert();
     });
 
     armOneShotCheckbox(importCb, () => {
@@ -1104,18 +1114,20 @@
         if (!Array.isArray(parsed)) throw new Error("Not an array");
         localStorage.setItem(getSessionKey(), JSON.stringify(parsed));
 
+        // also store order if present
         const ids = [];
         for (let i = 0; i < parsed.length; i++) ids.push(Number(parsed[i].id));
         saveOrder(ids);
 
         importBox.value = "";
         renderAllTimers();
-        alert("Imported.");
+        alert();
       } catch {
         alert("Invalid JSON. Paste only the array that starts with [ and ends with ].");
       }
     });
 
+    // -------- Initial render --------
     renderAllTimers();
   </script>
 
