@@ -79,22 +79,13 @@
     }
 
     /* Session + Import UI */
-    .session-row,
-    .import-row {
+    .session-row {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: var(--gap);
       margin-bottom: 10px;
       user-select: none;
       flex-wrap: nowrap;
-    }
-
-    #importBox {
-      width: 100%;
-      max-width: 700px;
-      height: 110px;
-      box-sizing: border-box;
-      font-size: 16px; /* helps iOS avoid zoom and improves paste */
     }
 
     /* ---------------- MOBILE ---------------- */
@@ -128,13 +119,9 @@
   <!-- Session / Sharing UI -->
   <div class="session-row">
     <input class="name" id="sessionCode" type="text" placeholder="Session code">
-    <button id="exportBtn" type="button">Export</button>
-    <button id="focusImportBtn" type="button">Focus Import</button>
-  </div>
-
-  <div class="import-row">
-    <textarea id="importBox" placeholder="Paste timers JSON here (starts with [ ends with ])"></textarea>
-    <button id="importApplyBtn" type="button">Apply Import</button>
+    <input class="name" id="importBox" type="text" placeholder="">
+    <input class="cb" id="importCb" type="checkbox">
+    <input class="cb" id="exportCb" type="checkbox">
   </div>
 
   <div id="timers"></div>
@@ -1095,12 +1082,11 @@
       }
     }
 
-    // -------- Session + Import wiring (mobile-friendly) --------
+    // -------- Session + Import wiring (checkbox-style like Clear) --------
     const sessionInput = document.getElementById("sessionCode");
-    const exportBtn = document.getElementById("exportBtn");
-    const focusImportBtn = document.getElementById("focusImportBtn");
     const importBox = document.getElementById("importBox");
-    const importApplyBtn = document.getElementById("importApplyBtn");
+    const importCb = document.getElementById("importCb");
+    const exportCb = document.getElementById("exportCb");
 
     sessionInput.value = sanitizeSessionCode(localStorage.getItem(STORAGE_KEY_BASE + "_session") || "");
 
@@ -1111,17 +1097,13 @@
       renderAllTimers();
     });
 
-    exportBtn.addEventListener("click", async () => {
+    armOneShotCheckbox(exportCb, async () => {
       const data = localStorage.getItem(getSessionKey()) || "[]";
       await navigator.clipboard.writeText(data);
-      alert("Copied timers JSON to clipboard.");
+      alert();
     });
 
-    focusImportBtn.addEventListener("click", () => {
-      importBox.focus();
-    });
-
-    importApplyBtn.addEventListener("click", () => {
+    armOneShotCheckbox(importCb, () => {
       const text = importBox.value.trim();
       if (!text) return;
 
@@ -1130,14 +1112,14 @@
         if (!Array.isArray(parsed)) throw new Error("Not an array");
         localStorage.setItem(getSessionKey(), JSON.stringify(parsed));
 
-        // also store order if present from current DOM after import
+        // also store order if present
         const ids = [];
         for (let i = 0; i < parsed.length; i++) ids.push(Number(parsed[i].id));
         saveOrder(ids);
 
         importBox.value = "";
         renderAllTimers();
-        alert("Imported.");
+        alert();
       } catch {
         alert("Invalid JSON. Paste only the array that starts with [ and ends with ].");
       }
