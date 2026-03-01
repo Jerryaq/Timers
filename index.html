@@ -55,7 +55,7 @@
       text-align: right;
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
-      cursor: grab;            /* drag handle */
+      cursor: grab; /* drag handle */
     }
 
     .display:active {
@@ -73,7 +73,16 @@
       height: 25px;
       box-sizing: border-box;
       padding: 0;
-      text-align: center;
+      text-align: left;
+    }
+
+    /* time boxes: 66px wide */
+    .timebox {
+      width: 66px;
+      height: 25px;
+      box-sizing: border-box;
+      padding: 0 2px;
+      text-align: left;
     }
 
     .cb {
@@ -225,7 +234,6 @@
     }
 
     function playNotificationSoundOnce() {
-      // If not unlocked yet, browsers may block play(); user gesture should unlock.
       try {
         const audio = new Audio(SOUND_URL);
         audio.preload = "auto";
@@ -254,7 +262,6 @@
       }
       saveState(items);
 
-      // update UI if rendered
       const counterEls = Array.from(timersContainer.querySelectorAll("input.counter"));
       for (let i = 0; i < counterEls.length; i++) {
         counterEls[i].value = "";
@@ -275,7 +282,7 @@
     function msUntilNextLocalMidnight() {
       const now = new Date();
       const next = new Date(now);
-      next.setHours(24, 0, 0, 0); // next midnight local time
+      next.setHours(24, 0, 0, 0);
       return Math.max(1000, next.getTime() - now.getTime());
     }
 
@@ -368,11 +375,79 @@
       blankIfZeroNumberInput(el, out);
     }
 
-    function readHMS(hourEl, minEl, secEl) {
-      const h = readIntBlankZero(hourEl, 0, MAX_HOURS);
-      const m = readIntBlankZero(minEl, 0, MAX_MINUTES);
-      const s = readIntBlankZero(secEl, 0, MAX_SECONDS);
-      return h * 3600 + m * 60 + s;
+    // --------- Time input parsing: "1:23:42" (also allows "23:42" or "42") ---------
+    function parseTimeToSeconds(raw) {
+      const s = String(raw || "").trim();
+      if (s === "") return { blank: true, seconds: 0 };
+
+      const parts = s.split(":").map((p) => p.trim()).filter((p) => p !== "");
+      if (parts.length === 0 || parts.length > 3) return { blank: false, seconds: 0, invalid: true };
+
+      for (let i = 0; i < parts.length; i++) {
+        if (!/^\d+$/.test(parts[i])) return { blank: false, seconds: 0, invalid: true };
+      }
+
+      let h = 0, m = 0, sec = 0;
+
+      if (parts.length === 3) {
+        h = Number(parts[0]);
+        m = Number(parts[1]);
+        sec = Number(parts[2]);
+      } else if (parts.length === 2) {
+        m = Number(parts[0]);
+        sec = Number(parts[1]);
+      } else {
+        sec = Number(parts[0]);
+      }
+
+      h = Math.min(MAX_HOURS, Math.max(0, Math.floor(h)));
+      m = Math.min(MAX_MINUTES, Math.max(0, Math.floor(m)));
+      sec = Math.min(MAX_SECONDS, Math.max(0, Math.floor(sec)));
+
+      return { blank: false, seconds: h * 3600 + m * 60 + sec };
+    }
+
+    function formatTimeForBox(totalSeconds) {
+      const t = Math.max(0, Math.floor(totalSeconds));
+      const h = Math.floor(t / 3600);
+      const m = Math.floor((t % 3600) / 60);
+      const s = t % 60;
+
+      // minimum 2 digits, but don't force 3
+      const hh = (h < 10) ? "0" + h : String(h);
+
+      return hh + ":" + pad2(m) + ":" + pad2(s);
+    }
+
+    function normalizeTimeBox(el) {
+      const parsed = parseTimeToSeconds(el.value);
+      if (parsed.blank) {
+        el.value = "";
+        return 0;
+      }
+      if (parsed.invalid) {
+        el.value = "";
+        return 0;
+      }
+      el.value = formatTimeForBox(parsed.seconds);
+      return parsed.seconds;
+    }
+
+    function blockTimeTyping(el) {
+      el.addEventListener("keydown", (e) => {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        const okKeys = [
+          "Backspace", "Delete", "Tab", "Escape", "Enter",
+          "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"
+        ];
+        if (okKeys.includes(e.key)) return;
+
+        if (e.key >= "0" && e.key <= "9") return;
+        if (e.key === ":") return;
+
+        e.preventDefault();
+      });
     }
 
     function randomIntInclusive(a, b) {
@@ -397,29 +472,10 @@
       });
     }
 
-    function blockNonNumericTyping(el) {
-      el.addEventListener("keydown", (e) => {
-        if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-        const okKeys = [
-          "Backspace", "Delete", "Tab", "Escape", "Enter",
-          "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"
-        ];
-        if (okKeys.includes(e.key)) return;
-
-        if (e.key >= "0" && e.key <= "9") return;
-
-        if (e.key === "-") { e.preventDefault(); return; }
-
-        e.preventDefault();
-      });
-    }
-
     // -------------------- DRAG & DROP (HANDLE-ONLY) --------------------
     let draggingId = null;
 
     function enableDragDrop(row, handleEl) {
-      // Only the display (numbers) is draggable
       handleEl.draggable = true;
 
       handleEl.addEventListener("dragstart", (e) => {
@@ -499,8 +555,8 @@
         id: id,
         type: "randomTimer",
         name: "",
-        hA: 0, mA: 0, sA: 0,
-        hB: 0, mB: 0, sB: 0,
+        aStr: "",
+        bStr: "",
         counter: 0,
         totalSeconds: 0,
         mode: "idle",
@@ -517,13 +573,26 @@
     function clampSavedItem(item) {
       const out = Object.assign(defaultItem(item.id), item);
 
-      out.hA = Math.min(MAX_HOURS, Math.max(0, Number(out.hA || 0)));
-      out.mA = Math.min(MAX_MINUTES, Math.max(0, Number(out.mA || 0)));
-      out.sA = Math.min(MAX_SECONDS, Math.max(0, Number(out.sA || 0)));
+      // Back-compat: if old hA/mA/sA exist, convert to aStr/bStr once
+      const hasOldA = (out.hA !== undefined || out.mA !== undefined || out.sA !== undefined);
+      const hasOldB = (out.hB !== undefined || out.mB !== undefined || out.sB !== undefined);
 
-      out.hB = Math.min(MAX_HOURS, Math.max(0, Number(out.hB || 0)));
-      out.mB = Math.min(MAX_MINUTES, Math.max(0, Number(out.mB || 0)));
-      out.sB = Math.min(MAX_SECONDS, Math.max(0, Number(out.sB || 0)));
+      if (!out.aStr && hasOldA) {
+        const h = Math.min(MAX_HOURS, Math.max(0, Number(out.hA || 0)));
+        const m = Math.min(MAX_MINUTES, Math.max(0, Number(out.mA || 0)));
+        const s = Math.min(MAX_SECONDS, Math.max(0, Number(out.sA || 0)));
+        if (h !== 0 || m !== 0 || s !== 0) out.aStr = String(h) + ":" + pad2(m) + ":" + pad2(s);
+      }
+
+      if (!out.bStr && hasOldB) {
+        const h = Math.min(MAX_HOURS, Math.max(0, Number(out.hB || 0)));
+        const m = Math.min(MAX_MINUTES, Math.max(0, Number(out.mB || 0)));
+        const s = Math.min(MAX_SECONDS, Math.max(0, Number(out.sB || 0)));
+        if (h !== 0 || m !== 0 || s !== 0) out.bStr = String(h) + ":" + pad2(m) + ":" + pad2(s);
+      }
+
+      out.aStr = String(out.aStr || "");
+      out.bStr = String(out.bStr || "");
 
       out.counter = Math.min(MAX_COUNTER, Math.max(0, Number(out.counter || 0)));
 
@@ -601,13 +670,8 @@
         <div class="display" id="rDisplay${id}">00:00:00</div>
         <input class="name" id="rName${id}" type="text">
 
-        <input class="num" id="rHourA${id}" type="number" min="0" max="${MAX_HOURS}">
-        <input class="num" id="rMinA${id}" type="number" min="0" max="${MAX_MINUTES}">
-        <input class="num" id="rSecA${id}" type="number" min="0" max="${MAX_SECONDS}">
-
-        <input class="num" id="rHourB${id}" type="number" min="0" max="${MAX_HOURS}">
-        <input class="num" id="rMinB${id}" type="number" min="0" max="${MAX_MINUTES}">
-        <input class="num" id="rSecB${id}" type="number" min="0" max="${MAX_SECONDS}">
+        <input class="timebox" id="rTimeA${id}" type="text" inputmode="numeric" placeholder="">
+        <input class="timebox" id="rTimeB${id}" type="text" inputmode="numeric" placeholder="">
 
         <input class="num counter" id="rCounter${id}" type="number" min="0" max="${MAX_COUNTER}" readonly tabindex="-1">
         <input class="cb" id="rCounterDec${id}" type="checkbox">
@@ -628,13 +692,8 @@
 
       const nameInput = document.getElementById(`rName${id}`);
 
-      const hA = document.getElementById(`rHourA${id}`);
-      const mA = document.getElementById(`rMinA${id}`);
-      const sA = document.getElementById(`rSecA${id}`);
-
-      const hB = document.getElementById(`rHourB${id}`);
-      const mB = document.getElementById(`rMinB${id}`);
-      const sB = document.getElementById(`rSecB${id}`);
+      const timeA = document.getElementById(`rTimeA${id}`);
+      const timeB = document.getElementById(`rTimeB${id}`);
 
       const counterInput = document.getElementById(`rCounter${id}`);
       const counterDecCb = document.getElementById(`rCounterDec${id}`);
@@ -646,12 +705,8 @@
       const loopCb = document.getElementById(`rLoop${id}`);
       const intervalCb = document.getElementById(`rInterval${id}`);
 
-      blockNonNumericTyping(hA);
-      blockNonNumericTyping(mA);
-      blockNonNumericTyping(sA);
-      blockNonNumericTyping(hB);
-      blockNonNumericTyping(mB);
-      blockNonNumericTyping(sB);
+      blockTimeTyping(timeA);
+      blockTimeTyping(timeB);
 
       // extra safety: counter cannot be changed even if focused somehow
       counterInput.addEventListener("keydown", (e) => e.preventDefault());
@@ -704,19 +759,23 @@
       }
 
       function isABlank() {
-        return hA.value === "" && mA.value === "" && sA.value === "";
+        return String(timeA.value || "").trim() === "";
       }
 
       function isBBlank() {
-        return hB.value === "" && mB.value === "" && sB.value === "";
+        return String(timeB.value || "").trim() === "";
       }
 
       function getASeconds() {
-        return readHMS(hA, mA, sA);
+        const p = parseTimeToSeconds(timeA.value);
+        if (p.blank || p.invalid) return 0;
+        return p.seconds;
       }
 
       function getBSeconds() {
-        return readHMS(hB, mB, sB);
+        const p = parseTimeToSeconds(timeB.value);
+        if (p.blank || p.invalid) return 0;
+        return p.seconds;
       }
 
       function pickSecondsRandom() {
@@ -752,13 +811,8 @@
 
         item.name = nameInput.value || "";
 
-        item.hA = readIntBlankZero(hA, 0, MAX_HOURS);
-        item.mA = readIntBlankZero(mA, 0, MAX_MINUTES);
-        item.sA = readIntBlankZero(sA, 0, MAX_SECONDS);
-
-        item.hB = readIntBlankZero(hB, 0, MAX_HOURS);
-        item.mB = readIntBlankZero(mB, 0, MAX_MINUTES);
-        item.sB = readIntBlankZero(sB, 0, MAX_SECONDS);
+        item.aStr = String(timeA.value || "");
+        item.bStr = String(timeB.value || "");
 
         item.loopEnabled = loopCb.checked;
         item.notifyEnabled = notifyCb.checked;
@@ -804,11 +858,9 @@
           totalSeconds = 0;
           render();
 
-          // Counter +1 every time it goes off
           incCounterBy1();
           snapshot("running");
 
-          // Notify (sound + browser notification)
           if (notifyCb.checked) {
             ensureNotificationPermission();
             scheduleNotificationSounds();
@@ -870,7 +922,6 @@
         stopInterval();
         clearAllSoundTimers();
 
-        // Best effort: unlock audio on run click
         unlockAudioOnce();
 
         if (!hasStarted) {
@@ -957,15 +1008,13 @@
 
       nameInput.value = data.name || "";
 
-      setInitialBlankZeroInt(hA, data.hA, MAX_HOURS);
-      setInitialBlankZeroInt(mA, data.mA, MAX_MINUTES);
-      setInitialBlankZeroInt(sA, data.sA, MAX_SECONDS);
+      timeA.value = String(data.aStr || "");
+      timeB.value = String(data.bStr || "");
 
-      setInitialBlankZeroInt(hB, data.hB, MAX_HOURS);
-      setInitialBlankZeroInt(mB, data.mB, MAX_MINUTES);
-      setInitialBlankZeroInt(sB, data.sB, MAX_SECONDS);
+      // normalize on load (keeps blanks blank)
+      if (String(timeA.value || "").trim() !== "") normalizeTimeBox(timeA);
+      if (String(timeB.value || "").trim() !== "") normalizeTimeBox(timeB);
 
-      // Counter display only
       setInitialBlankZeroInt(counterInput, data.counter, MAX_COUNTER);
 
       setCheckboxChecked(loopCb, Boolean(data.loopEnabled));
@@ -1000,21 +1049,11 @@
 
       nameInput.addEventListener("input", () => snapshot(intervalId !== null ? "running" : "idle"));
 
-      hA.addEventListener("input", onInputsChangedIdle);
-      mA.addEventListener("input", onInputsChangedIdle);
-      sA.addEventListener("input", onInputsChangedIdle);
+      timeA.addEventListener("input", onInputsChangedIdle);
+      timeB.addEventListener("input", onInputsChangedIdle);
 
-      hB.addEventListener("input", onInputsChangedIdle);
-      mB.addEventListener("input", onInputsChangedIdle);
-      sB.addEventListener("input", onInputsChangedIdle);
-
-      hA.addEventListener("blur", () => readIntBlankZero(hA, 0, MAX_HOURS));
-      mA.addEventListener("blur", () => readIntBlankZero(mA, 0, MAX_MINUTES));
-      sA.addEventListener("blur", () => readIntBlankZero(sA, 0, MAX_SECONDS));
-
-      hB.addEventListener("blur", () => readIntBlankZero(hB, 0, MAX_HOURS));
-      mB.addEventListener("blur", () => readIntBlankZero(mB, 0, MAX_MINUTES));
-      sB.addEventListener("blur", () => readIntBlankZero(sB, 0, MAX_SECONDS));
+      timeA.addEventListener("blur", () => { normalizeTimeBox(timeA); snapshot(intervalId !== null ? "running" : "idle"); });
+      timeB.addEventListener("blur", () => { normalizeTimeBox(timeB); snapshot(intervalId !== null ? "running" : "idle"); });
 
       if (data.mode === "running" && typeof data.runningStartAt === "number" && typeof data.runningBaseSeconds === "number") {
         runningBaseSeconds = Number(data.runningBaseSeconds || 0);
@@ -1050,7 +1089,6 @@
       teardownAllRows();
       items = ensureState();
 
-      // reset counters if day changed (covers page reload / returning later)
       maybeResetCountersForNewDay();
 
       for (let i = 0; i < items.length; i++) {
@@ -1088,7 +1126,6 @@
         if (!Array.isArray(parsed)) throw new Error("Not an array");
         localStorage.setItem(getSessionKey(), JSON.stringify(parsed));
 
-        // also store order if present
         const ids = [];
         for (let i = 0; i < parsed.length; i++) ids.push(Number(parsed[i].id));
         saveOrder(ids);
@@ -1102,7 +1139,6 @@
     });
 
     // -------- Initial render + midnight schedule --------
-    // Ensure we have a "last reset day" on first ever run, and reset if needed.
     maybeResetCountersForNewDay();
     scheduleMidnightCounterReset();
 
