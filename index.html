@@ -55,6 +55,11 @@
       text-align: right;
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
+      cursor: grab;            /* drag handle */
+    }
+
+    .display:active {
+      cursor: grabbing;
     }
 
     .name {
@@ -62,20 +67,24 @@
       box-sizing: border-box;
     }
 
+    /* small boxes: 25x25 */
     .num {
       width: 25px;
+      height: 25px;
       box-sizing: border-box;
-    }
-
-    .delay {
-      width: 37.5px;
-      box-sizing: border-box;
+      padding: 0;
+      text-align: center;
     }
 
     .cb {
       width: 25px;
       height: 25px;
       margin: 0;
+    }
+
+    /* Counter is display-only (not editable/clickable) */
+    .counter {
+      pointer-events: none;
     }
 
     /* Session + Import UI */
@@ -137,11 +146,24 @@
     const MAX_HOURS = 99;
     const MAX_MINUTES = 59;
     const MAX_SECONDS = 59;
-    const MAX_SOUNDS = 99;
-    const MAX_DELAY = 99;
+
+    const MAX_COUNTER = 99;
+
+    // Fixed: play 2 sounds, 0.25s apart
+    const FIXED_NOTIFY_COUNT = 2;
+    const FIXED_NOTIFY_DELAY_SECONDS = 0.25;
+
+    function pad2str(n) {
+      return String(n).padStart(2, "0");
+    }
+
+    function todayStampLocal() {
+      const d = new Date();
+      return String(d.getFullYear()) + "-" + pad2str(d.getMonth() + 1) + "-" + pad2str(d.getDate());
+    }
 
     // ---- Sound + Notification (GitHub Pages friendly) ----
-    // IMPORTANT: Put "notification.wav" next to this HTML file (same exact lowercase name).
+    // IMPORTANT: Put "Notification.wav" next to this HTML file (same exact lowercase name).
     const SOUND_URL = new URL("Notification.wav", document.baseURI).href;
 
     let audioUnlocked = false;
@@ -168,6 +190,7 @@
       // Preload sound (best effort)
       try {
         const a = new Audio(SOUND_URL);
+        a.preload = "auto";
         a.volume = 0.001;
         a.play().then(() => {
           a.pause();
@@ -205,6 +228,7 @@
       // If not unlocked yet, browsers may block play(); user gesture should unlock.
       try {
         const audio = new Audio(SOUND_URL);
+        audio.preload = "auto";
         audio.volume = 0.75;
         audio.play().catch(() => {});
       } catch {}
@@ -217,6 +241,49 @@
     function getSessionKey() {
       const code = sanitizeSessionCode(localStorage.getItem(STORAGE_KEY_BASE + "_session") || "");
       return STORAGE_KEY_BASE + (code ? ("__" + code) : "");
+    }
+
+    // --------- Daily counter reset (12:00 AM local) ---------
+    function getCounterResetKey() {
+      return getSessionKey() + "__counter_reset_day";
+    }
+
+    function resetAllCountersNow() {
+      for (let i = 0; i < items.length; i++) {
+        items[i].counter = 0;
+      }
+      saveState(items);
+
+      // update UI if rendered
+      const counterEls = Array.from(timersContainer.querySelectorAll("input.counter"));
+      for (let i = 0; i < counterEls.length; i++) {
+        counterEls[i].value = "";
+      }
+    }
+
+    function maybeResetCountersForNewDay() {
+      const key = getCounterResetKey();
+      const today = todayStampLocal();
+      const last = localStorage.getItem(key) || "";
+
+      if (last !== today) {
+        resetAllCountersNow();
+        localStorage.setItem(key, today);
+      }
+    }
+
+    function msUntilNextLocalMidnight() {
+      const now = new Date();
+      const next = new Date(now);
+      next.setHours(24, 0, 0, 0); // next midnight local time
+      return Math.max(1000, next.getTime() - now.getTime());
+    }
+
+    function scheduleMidnightCounterReset() {
+      setTimeout(() => {
+        maybeResetCountersForNewDay();
+        scheduleMidnightCounterReset();
+      }, msUntilNextLocalMidnight());
     }
 
     // --------- Drag order persistence ---------
@@ -295,30 +362,9 @@
       return out;
     }
 
-    function readFloatBlankZero(el, min, max) {
-      const raw = el.value;
-      const v = Number(raw === "" ? 0 : raw);
-
-      let out = v;
-      if (typeof min === "number") out = Math.max(min, out);
-      if (typeof max === "number") out = Math.min(max, out);
-
-      out = Math.floor(out * 100) / 100;
-
-      blankIfZeroNumberInput(el, out);
-      return out;
-    }
-
     function setInitialBlankZeroInt(el, v, max) {
       const n = Math.max(0, Math.floor(Number(v || 0)));
       const out = (typeof max === "number") ? Math.min(max, n) : n;
-      blankIfZeroNumberInput(el, out);
-    }
-
-    function setInitialBlankZeroFloat(el, v, max) {
-      const n = Math.max(0, Number(v || 0));
-      let out = (typeof max === "number") ? Math.min(max, n) : n;
-      out = Math.floor(out * 100) / 100;
       blankIfZeroNumberInput(el, out);
     }
 
@@ -335,22 +381,8 @@
       return lo + Math.floor(Math.random() * (hi - lo + 1));
     }
 
-    function readNotifySettings(countEl, delayEl) {
-      const rawCount = countEl.value;
-      const rawDelay = delayEl.value;
-
-      let count = Math.floor(Number(rawCount === "" ? 1 : rawCount));
-      let delay = Number(rawDelay === "" ? 0.25 : rawDelay);
-
-      count = Math.max(0, Math.min(MAX_SOUNDS, count));
-      delay = Math.max(0, Math.min(MAX_DELAY, delay));
-
-      delay = Math.floor(delay * 100) / 100;
-
-      if (rawCount !== "") blankIfZeroNumberInput(countEl, count);
-      if (rawDelay !== "") blankIfZeroNumberInput(delayEl, delay);
-
-      return { count, delay };
+    function getNotifySettingsFixed() {
+      return { count: FIXED_NOTIFY_COUNT, delay: FIXED_NOTIFY_DELAY_SECONDS };
     }
 
     function setCheckboxChecked(cb, checked) {
@@ -365,7 +397,7 @@
       });
     }
 
-    function blockNonNumericTyping(el, allowDot) {
+    function blockNonNumericTyping(el) {
       el.addEventListener("keydown", (e) => {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
 
@@ -376,7 +408,6 @@
         if (okKeys.includes(e.key)) return;
 
         if (e.key >= "0" && e.key <= "9") return;
-        if (allowDot && e.key === ".") return;
 
         if (e.key === "-") { e.preventDefault(); return; }
 
@@ -384,50 +415,19 @@
       });
     }
 
-    function enforceTwoDecimals(el) {
-      function fix() {
-        let v = el.value;
-        if (v === "") return;
-
-        v = v.replace(/[^0-9.]/g, "");
-        const firstDot = v.indexOf(".");
-        if (firstDot !== -1) {
-          const before = v.slice(0, firstDot + 1);
-          const after = v.slice(firstDot + 1).replace(/\./g, "");
-          v = before + after;
-        }
-
-        const dot = v.indexOf(".");
-        if (dot !== -1) {
-          const a = v.slice(0, dot);
-          const b = v.slice(dot + 1, dot + 3);
-          v = a + "." + b;
-        }
-
-        el.value = v;
-      }
-
-      el.addEventListener("input", fix);
-      el.addEventListener("blur", fix);
-    }
-
-    // -------------------- DRAG & DROP (RAW) --------------------
+    // -------------------- DRAG & DROP (HANDLE-ONLY) --------------------
     let draggingId = null;
 
-    function enableDragDrop(row) {
-      row.draggable = true;
+    function enableDragDrop(row, handleEl) {
+      // Only the display (numbers) is draggable
+      handleEl.draggable = true;
 
-      row.addEventListener("dragstart", (e) => {
-        if (e.target && e.target.tagName === "INPUT") {
-          e.preventDefault();
-          return;
-        }
-
+      handleEl.addEventListener("dragstart", (e) => {
         draggingId = Number(row.dataset.itemId);
         e.dataTransfer.effectAllowed = "move";
       });
 
-      row.addEventListener("dragend", () => {
+      handleEl.addEventListener("dragend", () => {
         draggingId = null;
       });
 
@@ -501,8 +501,7 @@
         name: "",
         hA: 0, mA: 0, sA: 0,
         hB: 0, mB: 0, sB: 0,
-        notifyCount: undefined,
-        notifyDelay: undefined,
+        counter: 0,
         totalSeconds: 0,
         mode: "idle",
         hasStarted: false,
@@ -526,10 +525,7 @@
       out.mB = Math.min(MAX_MINUTES, Math.max(0, Number(out.mB || 0)));
       out.sB = Math.min(MAX_SECONDS, Math.max(0, Number(out.sB || 0)));
 
-      if (out.notifyCount !== undefined) out.notifyCount = Math.min(MAX_SOUNDS, Math.max(0, Number(out.notifyCount || 0)));
-      if (out.notifyDelay !== undefined) out.notifyDelay = Math.min(MAX_DELAY, Math.max(0, Number(out.notifyDelay || 0)));
-
-      if (out.notifyDelay !== undefined) out.notifyDelay = Math.floor(Number(out.notifyDelay) * 100) / 100;
+      out.counter = Math.min(MAX_COUNTER, Math.max(0, Number(out.counter || 0)));
 
       out.intervalEnabled = Boolean(out.intervalEnabled);
       out.intervalPhase = (out.intervalPhase === "B") ? "B" : "A";
@@ -604,26 +600,32 @@
       row.innerHTML = `
         <div class="display" id="rDisplay${id}">00:00:00</div>
         <input class="name" id="rName${id}" type="text">
+
         <input class="num" id="rHourA${id}" type="number" min="0" max="${MAX_HOURS}">
         <input class="num" id="rMinA${id}" type="number" min="0" max="${MAX_MINUTES}">
         <input class="num" id="rSecA${id}" type="number" min="0" max="${MAX_SECONDS}">
+
         <input class="num" id="rHourB${id}" type="number" min="0" max="${MAX_HOURS}">
         <input class="num" id="rMinB${id}" type="number" min="0" max="${MAX_MINUTES}">
         <input class="num" id="rSecB${id}" type="number" min="0" max="${MAX_SECONDS}">
-        <input class="num" id="rNCount${id}" type="number" min="0" max="${MAX_SOUNDS}">
-        <input class="delay" id="rNDelay${id}" type="number" min="0" max="${MAX_DELAY}" step="0.01" inputmode="decimal">
-        <input class="cb" id="rRun${id}" type="checkbox">
+
+        <input class="num counter" id="rCounter${id}" type="number" min="0" max="${MAX_COUNTER}" readonly tabindex="-1">
+        <input class="cb" id="rCounterDec${id}" type="checkbox">
+
+        <!-- reset then start -->
         <input class="cb" id="rReset${id}" type="checkbox">
+        <input class="cb" id="rRun${id}" type="checkbox">
+
         <input class="cb" id="rNotify${id}" type="checkbox">
         <input class="cb" id="rLoop${id}" type="checkbox">
         <input class="cb" id="rInterval${id}" type="checkbox">
-        <input class="cb" id="rClear${id}" type="checkbox">
       `;
 
       timersContainer.appendChild(row);
-      enableDragDrop(row);
 
       const display = document.getElementById(`rDisplay${id}`);
+      enableDragDrop(row, display);
+
       const nameInput = document.getElementById(`rName${id}`);
 
       const hA = document.getElementById(`rHourA${id}`);
@@ -634,25 +636,27 @@
       const mB = document.getElementById(`rMinB${id}`);
       const sB = document.getElementById(`rSecB${id}`);
 
-      const nCountInput = document.getElementById(`rNCount${id}`);
-      const nDelayInput = document.getElementById(`rNDelay${id}`);
+      const counterInput = document.getElementById(`rCounter${id}`);
+      const counterDecCb = document.getElementById(`rCounterDec${id}`);
 
-      const runCb = document.getElementById(`rRun${id}`);
       const resetCb = document.getElementById(`rReset${id}`);
+      const runCb = document.getElementById(`rRun${id}`);
+
       const notifyCb = document.getElementById(`rNotify${id}`);
       const loopCb = document.getElementById(`rLoop${id}`);
       const intervalCb = document.getElementById(`rInterval${id}`);
-      const clearCb = document.getElementById(`rClear${id}`);
 
-      blockNonNumericTyping(hA, false);
-      blockNonNumericTyping(mA, false);
-      blockNonNumericTyping(sA, false);
-      blockNonNumericTyping(hB, false);
-      blockNonNumericTyping(mB, false);
-      blockNonNumericTyping(sB, false);
-      blockNonNumericTyping(nCountInput, false);
-      blockNonNumericTyping(nDelayInput, true);
-      enforceTwoDecimals(nDelayInput);
+      blockNonNumericTyping(hA);
+      blockNonNumericTyping(mA);
+      blockNonNumericTyping(sA);
+      blockNonNumericTyping(hB);
+      blockNonNumericTyping(mB);
+      blockNonNumericTyping(sB);
+
+      // extra safety: counter cannot be changed even if focused somehow
+      counterInput.addEventListener("keydown", (e) => e.preventDefault());
+      counterInput.addEventListener("paste", (e) => e.preventDefault());
+      counterInput.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
 
       let totalSeconds = Number(data.totalSeconds || 0);
       let intervalId = null;
@@ -677,9 +681,7 @@
       function scheduleNotificationSounds() {
         clearAllSoundTimers();
 
-        const ns = readNotifySettings(nCountInput, nDelayInput);
-        if (ns.count <= 0) return;
-
+        const ns = getNotifySettingsFixed();
         for (let i = 0; i < ns.count; i++) {
           const ms = Math.round(i * ns.delay * 1000);
           const t = setTimeout(() => {
@@ -692,11 +694,7 @@
 
       function notifyBrowserFinished() {
         const timerName = (nameInput.value || "").trim();
-
-        const title = timerName
-          ? timerName
-          : "Timer";
-
+        const title = timerName ? timerName : "Timer";
         showBrowserNotification(title, "");
       }
 
@@ -736,11 +734,21 @@
         return 0;
       }
 
+      function incCounterBy1() {
+        const cur = Number(counterInput.value === "" ? 0 : counterInput.value);
+        const next = Math.min(MAX_COUNTER, Math.max(0, cur + 1));
+        blankIfZeroNumberInput(counterInput, next);
+      }
+
+      function decCounterBy1() {
+        const cur = Number(counterInput.value === "" ? 0 : counterInput.value);
+        const next = Math.min(MAX_COUNTER, Math.max(0, cur - 1));
+        blankIfZeroNumberInput(counterInput, next);
+      }
+
       function snapshot(mode) {
         const item = getItemById(id);
         if (!alive || !item) return;
-
-        const ns = readNotifySettings(nCountInput, nDelayInput);
 
         item.name = nameInput.value || "";
 
@@ -752,13 +760,12 @@
         item.mB = readIntBlankZero(mB, 0, MAX_MINUTES);
         item.sB = readIntBlankZero(sB, 0, MAX_SECONDS);
 
-        item.notifyCount = (nCountInput.value === "") ? undefined : ns.count;
-        item.notifyDelay = (nDelayInput.value === "") ? undefined : ns.delay;
-
         item.loopEnabled = loopCb.checked;
         item.notifyEnabled = notifyCb.checked;
         item.intervalEnabled = intervalCb.checked;
         item.intervalPhase = intervalPhase;
+
+        item.counter = Math.min(MAX_COUNTER, Math.max(0, Number(counterInput.value === "" ? 0 : counterInput.value)));
 
         item.totalSeconds = totalSeconds;
         item.mode = mode;
@@ -796,6 +803,10 @@
         if (totalSeconds <= 0) {
           totalSeconds = 0;
           render();
+
+          // Counter +1 every time it goes off
+          incCounterBy1();
+          snapshot("running");
 
           // Notify (sound + browser notification)
           if (notifyCb.checked) {
@@ -928,42 +939,6 @@
         snapshot("idle");
       }
 
-      function clearTimer() {
-        const ok = confirm();
-        if (!ok) return;
-
-        stopInterval();
-        clearAllSoundTimers();
-
-        nameInput.value = "";
-
-        hA.value = "";
-        mA.value = "";
-        sA.value = "";
-
-        hB.value = "";
-        mB.value = "";
-        sB.value = "";
-
-        nCountInput.value = "";
-        nDelayInput.value = "";
-
-        setCheckboxChecked(runCb, false);
-        setCheckboxChecked(notifyCb, false);
-        setCheckboxChecked(loopCb, false);
-        setCheckboxChecked(intervalCb, false);
-
-        totalSeconds = 0;
-        render();
-
-        hasStarted = false;
-        intervalPhase = "A";
-        runningBaseSeconds = 0;
-        runningStartAt = 0;
-
-        snapshot("idle");
-      }
-
       function onInputsChangedIdle() {
         if (intervalId !== null) return;
 
@@ -990,10 +965,8 @@
       setInitialBlankZeroInt(mB, data.mB, MAX_MINUTES);
       setInitialBlankZeroInt(sB, data.sB, MAX_SECONDS);
 
-      const c = (data.notifyCount === undefined) ? 0 : Number(data.notifyCount || 0);
-      const d = (data.notifyDelay === undefined) ? 0 : Number(data.notifyDelay || 0);
-      setInitialBlankZeroInt(nCountInput, c, MAX_SOUNDS);
-      setInitialBlankZeroFloat(nDelayInput, d, MAX_DELAY);
+      // Counter display only
+      setInitialBlankZeroInt(counterInput, data.counter, MAX_COUNTER);
 
       setCheckboxChecked(loopCb, Boolean(data.loopEnabled));
       setCheckboxChecked(notifyCb, Boolean(data.notifyEnabled));
@@ -1007,12 +980,15 @@
       });
 
       armOneShotCheckbox(resetCb, reset);
-      armOneShotCheckbox(clearCb, clearTimer);
+
+      armOneShotCheckbox(counterDecCb, () => {
+        decCounterBy1();
+        snapshot(intervalId !== null ? "running" : "idle");
+      });
 
       loopCb.addEventListener("change", () => snapshot(intervalId !== null ? "running" : "idle"));
 
       notifyCb.addEventListener("change", () => {
-        // Ask permission when user enables notifications
         if (notifyCb.checked) ensureNotificationPermission();
         snapshot(intervalId !== null ? "running" : "idle");
       });
@@ -1032,9 +1008,6 @@
       mB.addEventListener("input", onInputsChangedIdle);
       sB.addEventListener("input", onInputsChangedIdle);
 
-      nCountInput.addEventListener("input", onInputsChangedIdle);
-      nDelayInput.addEventListener("input", onInputsChangedIdle);
-
       hA.addEventListener("blur", () => readIntBlankZero(hA, 0, MAX_HOURS));
       mA.addEventListener("blur", () => readIntBlankZero(mA, 0, MAX_MINUTES));
       sA.addEventListener("blur", () => readIntBlankZero(sA, 0, MAX_SECONDS));
@@ -1042,9 +1015,6 @@
       hB.addEventListener("blur", () => readIntBlankZero(hB, 0, MAX_HOURS));
       mB.addEventListener("blur", () => readIntBlankZero(mB, 0, MAX_MINUTES));
       sB.addEventListener("blur", () => readIntBlankZero(sB, 0, MAX_SECONDS));
-
-      nCountInput.addEventListener("blur", () => readIntBlankZero(nCountInput, 0, MAX_SOUNDS));
-      nDelayInput.addEventListener("blur", () => readFloatBlankZero(nDelayInput, 0, MAX_DELAY));
 
       if (data.mode === "running" && typeof data.runningStartAt === "number" && typeof data.runningBaseSeconds === "number") {
         runningBaseSeconds = Number(data.runningBaseSeconds || 0);
@@ -1079,12 +1049,16 @@
     function renderAllTimers() {
       teardownAllRows();
       items = ensureState();
+
+      // reset counters if day changed (covers page reload / returning later)
+      maybeResetCountersForNewDay();
+
       for (let i = 0; i < items.length; i++) {
         createRandomTimerRow(items[i]);
       }
     }
 
-    // -------- Session + Import wiring (checkbox-style like Clear) --------
+    // -------- Session + Import wiring --------
     const sessionInput = document.getElementById("sessionCode");
     const importBox = document.getElementById("importBox");
     const importCb = document.getElementById("importCb");
@@ -1127,7 +1101,11 @@
       }
     });
 
-    // -------- Initial render --------
+    // -------- Initial render + midnight schedule --------
+    // Ensure we have a "last reset day" on first ever run, and reset if needed.
+    maybeResetCountersForNewDay();
+    scheduleMidnightCounterReset();
+
     renderAllTimers();
   </script>
 
