@@ -127,6 +127,11 @@
         flex: 0 0 95px;
       }
 
+      /* time boxes 5px wider on mobile */
+      .timebox {
+        width: 71px;
+      }
+
       /* prevent iOS zoom */
       input, button, textarea {
         font-size: 16px;
@@ -157,6 +162,7 @@
     const MAX_SECONDS = 59;
 
     const MAX_COUNTER = 99;
+    const MIN_COUNTER = 0; // BACK TO 0
 
     // Fixed: play 2 sounds, 0.25s apart
     const FIXED_NOTIFY_COUNT = 2;
@@ -293,6 +299,15 @@
       }, msUntilNextLocalMidnight());
     }
 
+    // Extra reliability: browsers may throttle timers in background/sleep
+    window.addEventListener("focus", () => {
+      maybeResetCountersForNewDay();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) maybeResetCountersForNewDay();
+    });
+
     // --------- Drag order persistence ---------
     function getOrderKey() {
       return getSessionKey() + "__order";
@@ -359,19 +374,9 @@
       else el.value = value;
     }
 
-    function readIntBlankZero(el, min, max) {
-      const raw = el.value;
-      const v = Number(raw === "" ? 0 : raw);
-      let out = Math.floor(v);
-      if (typeof min === "number") out = Math.max(min, out);
-      if (typeof max === "number") out = Math.min(max, out);
-      blankIfZeroNumberInput(el, out);
-      return out;
-    }
-
     function setInitialBlankZeroInt(el, v, max) {
-      const n = Math.max(0, Math.floor(Number(v || 0)));
-      const out = (typeof max === "number") ? Math.min(max, n) : n;
+      const n = Math.floor(Number(v || 0));
+      const out = Math.min(max, Math.max(MIN_COUNTER, n));
       blankIfZeroNumberInput(el, out);
     }
 
@@ -413,7 +418,6 @@
       const m = Math.floor((t % 3600) / 60);
       const s = t % 60;
 
-      // minimum 2 digits, but don't force 3
       const hh = (h < 10) ? "0" + h : String(h);
 
       return hh + ":" + pad2(m) + ":" + pad2(s);
@@ -573,7 +577,6 @@
     function clampSavedItem(item) {
       const out = Object.assign(defaultItem(item.id), item);
 
-      // Back-compat: if old hA/mA/sA exist, convert to aStr/bStr once
       const hasOldA = (out.hA !== undefined || out.mA !== undefined || out.sA !== undefined);
       const hasOldB = (out.hB !== undefined || out.mB !== undefined || out.sB !== undefined);
 
@@ -594,6 +597,7 @@
       out.aStr = String(out.aStr || "");
       out.bStr = String(out.bStr || "");
 
+      // BACK TO: clamp to 0..MAX_COUNTER
       out.counter = Math.min(MAX_COUNTER, Math.max(0, Number(out.counter || 0)));
 
       out.intervalEnabled = Boolean(out.intervalEnabled);
@@ -708,7 +712,6 @@
       blockTimeTyping(timeA);
       blockTimeTyping(timeB);
 
-      // extra safety: counter cannot be changed even if focused somehow
       counterInput.addEventListener("keydown", (e) => e.preventDefault());
       counterInput.addEventListener("paste", (e) => e.preventDefault());
       counterInput.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
@@ -801,7 +804,7 @@
 
       function decCounterBy1() {
         const cur = Number(counterInput.value === "" ? 0 : counterInput.value);
-        const next = Math.min(MAX_COUNTER, Math.max(0, cur - 1));
+        const next = Math.min(MAX_COUNTER, Math.max(0, cur - 1)); // stays >= 0
         blankIfZeroNumberInput(counterInput, next);
       }
 
@@ -810,7 +813,6 @@
         if (!alive || !item) return;
 
         item.name = nameInput.value || "";
-
         item.aStr = String(timeA.value || "");
         item.bStr = String(timeB.value || "");
 
@@ -1011,7 +1013,6 @@
       timeA.value = String(data.aStr || "");
       timeB.value = String(data.bStr || "");
 
-      // normalize on load (keeps blanks blank)
       if (String(timeA.value || "").trim() !== "") normalizeTimeBox(timeA);
       if (String(timeB.value || "").trim() !== "") normalizeTimeBox(timeB);
 
