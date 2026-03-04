@@ -47,7 +47,7 @@
       display: flex;
       align-items: center;
       gap: var(--gap);
-      margin-bottom: 5px;
+      margin-bottom: var(--gap);
       user-select: none;
       flex-wrap: nowrap; /* desktop unchanged */
     }
@@ -109,18 +109,12 @@
       display: flex;
       align-items: center;
       gap: var(--gap);
-      margin-bottom: 10px;
+
+      /* Make vertical distance match the same spacing used between boxes (var(--gap)) */
+      margin-bottom: var(--gap);
+
       user-select: none;
       flex-wrap: nowrap;
-    }
-
-    /* Import box same size as name boxes */
-    .importbox {
-      width: var(--timew);
-      height: 25px;
-      box-sizing: border-box;
-      padding: 0 2px;
-      text-align: left;
     }
 
     /* ---------------- MOBILE ---------------- */
@@ -151,9 +145,8 @@
 </head>
 <body>
 
-  <!-- Import/Export UI -->
+  <!-- Import/Export UI (no import text box, reads clipboard directly) -->
   <div class="session-row">
-    <input class="importbox" id="importBox" type="text" placeholder="">
     <input class="cb" id="importCb" type="checkbox">
     <input class="cb" id="exportCb" type="checkbox">
   </div>
@@ -666,7 +659,7 @@
       }
     }
 
-    // -------------------- SAVE EVERYTHING BEFORE LEAVING (MOBILE SAFE) --------------------
+    // -------------------- SAVE EVERYTHING (MOBILE SAFE) --------------------
     function saveAllFromDOM() {
       const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
 
@@ -696,6 +689,23 @@
 
       saveState(items);
     }
+
+    // Save immediately when user edits (fixes iOS cases where refresh skips blur/unload)
+    document.addEventListener("input", (e) => {
+      const t = e.target;
+      if (!t) return;
+      if (t.classList && (t.classList.contains("timebox") || t.classList.contains("name"))) {
+        saveAllFromDOM();
+      }
+    }, true);
+
+    document.addEventListener("change", (e) => {
+      const t = e.target;
+      if (!t) return;
+      if (t.classList && (t.classList.contains("timebox") || t.classList.contains("name"))) {
+        saveAllFromDOM();
+      }
+    }, true);
 
     window.addEventListener("pagehide", () => {
       saveAllFromDOM();
@@ -741,10 +751,8 @@
       enableDragDrop(row, display);
 
       const nameInput = document.getElementById(`rName${id}`);
-
       const timeA = document.getElementById(`rTimeA${id}`);
       const timeB = document.getElementById(`rTimeB${id}`);
-
       const counterInput = document.getElementById(`rCounter${id}`);
 
       const resetCb = document.getElementById(`rReset${id}`);
@@ -1108,6 +1116,16 @@
       timeA.addEventListener("change", onInputsChangedIdle);
       timeB.addEventListener("change", onInputsChangedIdle);
 
+      // Extra: catch iOS odd cases when clearing via keyboard actions
+      timeA.addEventListener("keyup", onInputsChangedIdle);
+      timeB.addEventListener("keyup", onInputsChangedIdle);
+
+      timeA.addEventListener("paste", onInputsChangedIdle);
+      timeB.addEventListener("paste", onInputsChangedIdle);
+
+      timeA.addEventListener("cut", onInputsChangedIdle);
+      timeB.addEventListener("cut", onInputsChangedIdle);
+
       timeA.addEventListener("blur", () => { normalizeTimeBox(timeA); snapshot(intervalId !== null ? "running" : "idle"); });
       timeB.addEventListener("blur", () => { normalizeTimeBox(timeB); snapshot(intervalId !== null ? "running" : "idle"); });
 
@@ -1153,7 +1171,6 @@
     }
 
     // -------- Import/Export wiring --------
-    const importBox = document.getElementById("importBox");
     const importCb = document.getElementById("importCb");
     const exportCb = document.getElementById("exportCb");
 
@@ -1163,8 +1180,18 @@
       alert();
     });
 
-    armOneShotCheckbox(importCb, () => {
-      const text = importBox.value.trim();
+    // Import reads clipboard and imports immediately; only the final blank alert() remains
+    armOneShotCheckbox(importCb, async () => {
+      let text = "";
+
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        alert("Clipboard read failed.");
+        return;
+      }
+
+      text = String(text || "").trim();
       if (!text) return;
 
       try {
@@ -1176,11 +1203,10 @@
         for (let i = 0; i < parsed.length; i++) ids.push(Number(parsed[i].id));
         saveOrder(ids);
 
-        importBox.value = "";
         renderAllTimers();
         alert();
       } catch {
-        alert("Invalid JSON. Paste only the array that starts with [ and ends with ].");
+        alert("Invalid JSON in clipboard. Copy only the array that starts with [ and ends with ].");
       }
     });
 
