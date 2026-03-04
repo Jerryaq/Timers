@@ -662,6 +662,50 @@
       }
     }
 
+    // -------------------- NEW: SAVE EVERYTHING BEFORE LEAVING (MOBILE SAFE) --------------------
+    function saveAllFromDOM() {
+      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+
+      for (let i = 0; i < rows.length; i++) {
+        const id = Number(rows[i].dataset.itemId);
+        const item = getItemById(id);
+        if (!item) continue;
+
+        const nameInput = rows[i].querySelector(`#rName${id}`);
+        const timeA = rows[i].querySelector(`#rTimeA${id}`);
+        const timeB = rows[i].querySelector(`#rTimeB${id}`);
+        const counterInput = rows[i].querySelector(`#rCounter${id}`);
+        const notifyCb = rows[i].querySelector(`#rNotify${id}`);
+        const loopCb = rows[i].querySelector(`#rLoop${id}`);
+        const intervalCb = rows[i].querySelector(`#rInterval${id}`);
+
+        item.name = nameInput ? (nameInput.value || "") : (item.name || "");
+        item.aStr = timeA ? String(timeA.value || "") : (item.aStr || "");
+        item.bStr = timeB ? String(timeB.value || "") : (item.bStr || "");
+
+        item.counter = Math.min(MAX_COUNTER, Math.max(0, Number(counterInput && counterInput.value !== "" ? counterInput.value : 0)));
+
+        item.notifyEnabled = Boolean(notifyCb && notifyCb.checked);
+        item.loopEnabled = Boolean(loopCb && loopCb.checked);
+        item.intervalEnabled = Boolean(intervalCb && intervalCb.checked);
+      }
+
+      saveState(items);
+    }
+
+    // Try multiple lifecycle hooks (mobile Safari can skip blur/input before refresh)
+    window.addEventListener("pagehide", () => {
+      saveAllFromDOM();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      saveAllFromDOM();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) saveAllFromDOM();
+    });
+
     // -------------------- TIMER ROWS --------------------
     function createRandomTimerRow(data) {
       const id = data.id;
@@ -1052,6 +1096,10 @@
 
       timeA.addEventListener("input", onInputsChangedIdle);
       timeB.addEventListener("input", onInputsChangedIdle);
+
+      // NEW: mobile keyboards sometimes commit on "change" not "input"
+      timeA.addEventListener("change", onInputsChangedIdle);
+      timeB.addEventListener("change", onInputsChangedIdle);
 
       timeA.addEventListener("blur", () => { normalizeTimeBox(timeA); snapshot(intervalId !== null ? "running" : "idle"); });
       timeB.addEventListener("blur", () => { normalizeTimeBox(timeB); snapshot(intervalId !== null ? "running" : "idle"); });
