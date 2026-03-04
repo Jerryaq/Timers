@@ -104,19 +104,6 @@
       cursor: pointer;
     }
 
-    /* Import/Export UI */
-    .session-row {
-      display: flex;
-      align-items: center;
-      gap: var(--gap);
-
-      /* Match vertical spacing to horizontal spacing */
-      margin-bottom: var(--gap);
-
-      user-select: none;
-      flex-wrap: nowrap;
-    }
-
     /* ---------------- MOBILE ---------------- */
     @media (max-width: 700px) {
       :root { --timew: 71px; }
@@ -136,12 +123,6 @@
   </style>
 </head>
 <body>
-
-  <!-- Import/Export UI (reads clipboard; falls back to paste prompt if clipboard fails) -->
-  <div class="session-row">
-    <input class="cb" id="importCb" type="checkbox">
-    <input class="cb" id="exportCb" type="checkbox">
-  </div>
 
   <div id="timers"></div>
 
@@ -182,6 +163,7 @@
       if (audioUnlocked) return;
       audioUnlocked = true;
 
+      // Unlock WebAudio (helps iOS/Safari + autoplay rules)
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (Ctx) {
@@ -195,6 +177,7 @@
         }
       } catch {}
 
+      // Preload sound (best effort)
       try {
         const a = new Audio(SOUND_URL);
         a.preload = "auto";
@@ -205,15 +188,17 @@
         }).catch(() => {});
       } catch {}
 
+      // Ask notification permission on first interaction (best effort)
       ensureNotificationPermission();
     }
 
+    // Any user gesture will unlock audio + allow notifications
     document.addEventListener("pointerdown", unlockAudioOnce, { once: true });
     document.addEventListener("keydown", unlockAudioOnce, { once: true });
 
     function ensureNotificationPermission() {
       if (!("Notification" in window)) return;
-      if (!window.isSecureContext) return;
+      if (!window.isSecureContext) return; // Notifications require HTTPS or localhost
       if (Notification.permission === "default") {
         Notification.requestPermission().catch(() => {});
       }
@@ -223,7 +208,10 @@
       if (!("Notification" in window)) return;
       if (!window.isSecureContext) return;
       if (Notification.permission !== "granted") return;
-      try { new Notification(title, { body }); } catch {}
+
+      try {
+        new Notification(title, { body });
+      } catch {}
     }
 
     function playNotificationSoundOnce() {
@@ -236,6 +224,7 @@
     }
 
     function getSessionKey() {
+      // Single storage key
       return STORAGE_KEY_BASE;
     }
 
@@ -245,11 +234,15 @@
     }
 
     function resetAllCountersNow() {
-      for (let i = 0; i < items.length; i++) items[i].counter = 0;
+      for (let i = 0; i < items.length; i++) {
+        items[i].counter = 0;
+      }
       saveState(items);
 
       const counterEls = Array.from(timersContainer.querySelectorAll("input.counter"));
-      for (let i = 0; i < counterEls.length; i++) counterEls[i].value = "";
+      for (let i = 0; i < counterEls.length; i++) {
+        counterEls[i].value = "";
+      }
     }
 
     function maybeResetCountersForNewDay() {
@@ -277,8 +270,14 @@
       }, msUntilNextLocalMidnight());
     }
 
-    window.addEventListener("focus", () => { maybeResetCountersForNewDay(); });
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) maybeResetCountersForNewDay(); });
+    // Extra reliability: browsers may throttle timers in background/sleep
+    window.addEventListener("focus", () => {
+      maybeResetCountersForNewDay();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) maybeResetCountersForNewDay();
+    });
 
     // --------- Drag order persistence ---------
     function getOrderKey() {
@@ -288,11 +287,14 @@
     function loadOrder() {
       const raw = localStorage.getItem(getOrderKey());
       if (!raw) return null;
+
       try {
         const arr = JSON.parse(raw);
         if (!Array.isArray(arr)) return null;
         return arr.map(Number).filter((n) => Number.isFinite(n));
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     }
 
     function saveOrder(orderIds) {
@@ -325,7 +327,9 @@
       return out;
     }
 
-    function pad2(n) { return String(n).padStart(2, "0"); }
+    function pad2(n) {
+      return String(n).padStart(2, "0");
+    }
 
     function formatHMSFixed(totalSeconds) {
       const t = Math.max(0, Math.floor(totalSeconds));
@@ -347,6 +351,7 @@
       blankIfZeroNumberInput(el, out);
     }
 
+    // --------- Time input parsing: "1:23:42" (also allows "23:42" or "42") ---------
     function parseTimeToSeconds(raw) {
       const s = String(raw || "").trim();
       if (s === "") return { blank: true, seconds: 0 };
@@ -383,14 +388,22 @@
       const h = Math.floor(t / 3600);
       const m = Math.floor((t % 3600) / 60);
       const s = t % 60;
+
       const hh = (h < 10) ? "0" + h : String(h);
+
       return hh + ":" + pad2(m) + ":" + pad2(s);
     }
 
     function normalizeTimeBox(el) {
       const parsed = parseTimeToSeconds(el.value);
-      if (parsed.blank) { el.value = ""; return 0; }
-      if (parsed.invalid) { el.value = ""; return 0; }
+      if (parsed.blank) {
+        el.value = "";
+        return 0;
+      }
+      if (parsed.invalid) {
+        el.value = "";
+        return 0;
+      }
       el.value = formatTimeForBox(parsed.seconds);
       return parsed.seconds;
     }
@@ -445,7 +458,9 @@
         e.dataTransfer.effectAllowed = "move";
       });
 
-      handleEl.addEventListener("dragend", () => { draggingId = null; });
+      handleEl.addEventListener("dragend", () => {
+        draggingId = null;
+      });
 
       row.addEventListener("dragover", (e) => {
         e.preventDefault();
@@ -501,7 +516,9 @@
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return null;
         return parsed;
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     }
 
     function saveState(items) {
@@ -599,7 +616,9 @@
     let items = ensureState();
 
     function getItemById(id) {
-      for (let i = 0; i < items.length; i++) if (items[i].id === id) return items[i];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === id) return items[i];
+      }
       return null;
     }
 
@@ -644,21 +663,34 @@
       saveState(items);
     }
 
+    // Save immediately when user edits (fixes iOS cases where refresh skips blur/unload)
     document.addEventListener("input", (e) => {
       const t = e.target;
       if (!t) return;
-      if (t.classList && (t.classList.contains("timebox") || t.classList.contains("name"))) saveAllFromDOM();
+      if (t.classList && (t.classList.contains("timebox") || t.classList.contains("name"))) {
+        saveAllFromDOM();
+      }
     }, true);
 
     document.addEventListener("change", (e) => {
       const t = e.target;
       if (!t) return;
-      if (t.classList && (t.classList.contains("timebox") || t.classList.contains("name"))) saveAllFromDOM();
+      if (t.classList && (t.classList.contains("timebox") || t.classList.contains("name"))) {
+        saveAllFromDOM();
+      }
     }, true);
 
-    window.addEventListener("pagehide", () => { saveAllFromDOM(); });
-    window.addEventListener("beforeunload", () => { saveAllFromDOM(); });
-    document.addEventListener("visibilitychange", () => { if (document.hidden) saveAllFromDOM(); });
+    window.addEventListener("pagehide", () => {
+      saveAllFromDOM();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      saveAllFromDOM();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) saveAllFromDOM();
+    });
 
     // -------------------- TIMER ROWS --------------------
     function createRandomTimerRow(data) {
@@ -677,6 +709,7 @@
 
         <input class="num counter" id="rCounter${id}" type="number" min="0" max="${MAX_COUNTER}" readonly tabindex="-1">
 
+        <!-- reset then start -->
         <input class="cb" id="rReset${id}" type="checkbox">
         <input class="cb" id="rRun${id}" type="checkbox">
 
@@ -691,8 +724,10 @@
       enableDragDrop(row, display);
 
       const nameInput = document.getElementById(`rName${id}`);
+
       const timeA = document.getElementById(`rTimeA${id}`);
       const timeB = document.getElementById(`rTimeB${id}`);
+
       const counterInput = document.getElementById(`rCounter${id}`);
 
       const resetCb = document.getElementById(`rReset${id}`);
@@ -720,7 +755,9 @@
       let soundTimeoutIds = [];
       let alive = true;
 
-      function render() { display.textContent = formatHMSFixed(totalSeconds); }
+      function render() {
+        display.textContent = formatHMSFixed(totalSeconds);
+      }
 
       function clearAllSoundTimers() {
         for (let i = 0; i < soundTimeoutIds.length; i++) clearTimeout(soundTimeoutIds[i]);
@@ -729,6 +766,7 @@
 
       function scheduleNotificationSounds() {
         clearAllSoundTimers();
+
         const ns = getNotifySettingsFixed();
         for (let i = 0; i < ns.count; i++) {
           const ms = Math.round(i * ns.delay * 1000);
@@ -751,8 +789,13 @@
         return Math.max(0, runningBaseSeconds - elapsed);
       }
 
-      function isABlank() { return String(timeA.value || "").trim() === ""; }
-      function isBBlank() { return String(timeB.value || "").trim() === ""; }
+      function isABlank() {
+        return String(timeA.value || "").trim() === "";
+      }
+
+      function isBBlank() {
+        return String(timeB.value || "").trim() === "";
+      }
 
       function getASeconds() {
         const p = parseTimeToSeconds(timeA.value);
@@ -777,6 +820,7 @@
           const b = getBSeconds();
           return randomIntInclusive(a, b);
         }
+
         return 0;
       }
 
@@ -883,6 +927,7 @@
                 }
               }
             }
+
             stopToIdle();
             return;
           }
@@ -911,6 +956,7 @@
 
         if (!hasStarted) {
           const bothSet = !isABlank() && !isBBlank();
+
           let startSeconds = 0;
 
           if (intervalCb.checked && bothSet) {
@@ -991,6 +1037,7 @@
       }
 
       nameInput.value = data.name || "";
+
       timeA.value = String(data.aStr || "");
       timeB.value = String(data.bStr || "");
 
@@ -1005,9 +1052,14 @@
 
       render();
 
-      runCb.addEventListener("change", () => { if (runCb.checked) startRunning(); else pauseRunning(); });
+      runCb.addEventListener("change", () => {
+        if (runCb.checked) startRunning();
+        else pauseRunning();
+      });
+
       armOneShotCheckbox(resetCb, reset);
 
+      // click counter to decrement
       counterInput.addEventListener("click", () => {
         decCounterBy1();
         snapshot(intervalId !== null ? "running" : "idle");
@@ -1035,12 +1087,17 @@
 
       timeA.addEventListener("input", onInputsChangedIdle);
       timeB.addEventListener("input", onInputsChangedIdle);
+
       timeA.addEventListener("change", onInputsChangedIdle);
       timeB.addEventListener("change", onInputsChangedIdle);
+
+      // Extra: catch iOS odd cases when clearing via keyboard actions
       timeA.addEventListener("keyup", onInputsChangedIdle);
       timeB.addEventListener("keyup", onInputsChangedIdle);
+
       timeA.addEventListener("paste", onInputsChangedIdle);
       timeB.addEventListener("paste", onInputsChangedIdle);
+
       timeA.addEventListener("cut", onInputsChangedIdle);
       timeB.addEventListener("cut", onInputsChangedIdle);
 
@@ -1080,60 +1137,18 @@
     function renderAllTimers() {
       teardownAllRows();
       items = ensureState();
+
       maybeResetCountersForNewDay();
-      for (let i = 0; i < items.length; i++) createRandomTimerRow(items[i]);
+
+      for (let i = 0; i < items.length; i++) {
+        createRandomTimerRow(items[i]);
+      }
     }
-
-    // -------- Import/Export wiring --------
-    const importCb = document.getElementById("importCb");
-    const exportCb = document.getElementById("exportCb");
-
-    armOneShotCheckbox(exportCb, async () => {
-      const data = localStorage.getItem(getSessionKey()) || "[]";
-      await navigator.clipboard.writeText(data);
-      alert();
-    });
-
-    // FIX: phones often fail clipboard readText -> fallback to manual paste prompt
-    armOneShotCheckbox(importCb, async () => {
-      let text = "";
-
-      // Try direct clipboard
-      try {
-        text = await navigator.clipboard.readText();
-      } catch {
-        text = "";
-      }
-
-      // Fallback: paste prompt
-      if (!String(text || "").trim()) {
-        const pasted = prompt(""); // paste your exported JSON array
-        if (pasted === null) return;
-        text = String(pasted || "");
-      }
-
-      text = String(text || "").trim();
-      if (!text) return;
-
-      try {
-        const parsed = JSON.parse(text);
-        if (!Array.isArray(parsed)) throw new Error("Not an array");
-        localStorage.setItem(getSessionKey(), JSON.stringify(parsed));
-
-        const ids = [];
-        for (let i = 0; i < parsed.length; i++) ids.push(Number(parsed[i].id));
-        saveOrder(ids);
-
-        renderAllTimers();
-        alert(); // only blank confirmation
-      } catch {
-        alert("Invalid JSON. Copy/paste only the array that starts with [ and ends with ].");
-      }
-    });
 
     // -------- Initial render + midnight schedule --------
     maybeResetCountersForNewDay();
     scheduleMidnightCounterReset();
+
     renderAllTimers();
   </script>
 
