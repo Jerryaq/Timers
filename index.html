@@ -60,10 +60,15 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
       cursor: grab; /* drag handle */
+      touch-action: none; /* IMPORTANT: allow pointer-drag on phones */
     }
 
     .display:active {
       cursor: grabbing;
+    }
+
+    .timer-row.dragging {
+      opacity: 0.65;
     }
 
     /* Name boxes same width/height as time boxes */
@@ -142,6 +147,9 @@
     // Fixed: play 2 sounds, 0.25s apart
     const FIXED_NOTIFY_COUNT = 2;
     const FIXED_NOTIFY_DELAY_SECONDS = 0.25;
+
+    // Detect phones/tablets (coarse pointer) for touch dragging
+    const IS_COARSE_POINTER = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
     function pad2str(n) {
       return String(n).padStart(2, "0");
@@ -448,45 +456,117 @@
     }
 
     // -------------------- DRAG & DROP (HANDLE-ONLY) --------------------
+    // Desktop: HTML5 drag/drop
+    // Mobile: pointer-based drag (works on iOS/Android)
     let draggingId = null;
 
     function enableDragDrop(row, handleEl) {
-      handleEl.draggable = true;
+      if (!IS_COARSE_POINTER) {
+        // Desktop / mouse
+        handleEl.draggable = true;
 
-      handleEl.addEventListener("dragstart", (e) => {
-        draggingId = Number(row.dataset.itemId);
-        e.dataTransfer.effectAllowed = "move";
-      });
+        handleEl.addEventListener("dragstart", (e) => {
+          draggingId = Number(row.dataset.itemId);
+          e.dataTransfer.effectAllowed = "move";
+        });
 
-      handleEl.addEventListener("dragend", () => {
-        draggingId = null;
-      });
+        handleEl.addEventListener("dragend", () => {
+          draggingId = null;
+        });
 
-      row.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-      });
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        });
 
-      row.addEventListener("drop", (e) => {
-        e.preventDefault();
-        if (draggingId === null) return;
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          if (draggingId === null) return;
 
-        const targetId = Number(row.dataset.itemId);
-        if (targetId === draggingId) return;
+          const targetId = Number(row.dataset.itemId);
+          if (targetId === draggingId) return;
 
-        const draggingRow = timersContainer.querySelector(`.timer-row[data-item-id="${draggingId}"]`);
-        const targetRow = timersContainer.querySelector(`.timer-row[data-item-id="${targetId}"]`);
-        if (!draggingRow || !targetRow) return;
+          const draggingRow = timersContainer.querySelector(`.timer-row[data-item-id="${draggingId}"]`);
+          const targetRow = timersContainer.querySelector(`.timer-row[data-item-id="${targetId}"]`);
+          if (!draggingRow || !targetRow) return;
+
+          const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+          const dragIndex = rows.indexOf(draggingRow);
+          const targetIndex = rows.indexOf(targetRow);
+
+          if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
+          else timersContainer.insertBefore(draggingRow, targetRow);
+
+          saveOrderFromDOM();
+        });
+
+        return;
+      }
+
+      // Mobile / touch: pointer dragging on handle only
+      let draggingRow = null;
+      let pointerId = null;
+
+      function moveToTargetAtPoint(x, y) {
+        const el = document.elementFromPoint(x, y);
+        if (!el) return;
+
+        const targetRow = el.closest(".timer-row");
+        if (!targetRow) return;
+        if (!draggingRow || targetRow === draggingRow) return;
 
         const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
         const dragIndex = rows.indexOf(draggingRow);
         const targetIndex = rows.indexOf(targetRow);
 
+        if (dragIndex < 0 || targetIndex < 0) return;
+
         if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
         else timersContainer.insertBefore(draggingRow, targetRow);
+      }
+
+      function onPointerMove(e) {
+        if (!draggingRow) return;
+        if (pointerId !== null && e.pointerId !== pointerId) return;
+        e.preventDefault();
+        moveToTargetAtPoint(e.clientX, e.clientY);
+      }
+
+      function endDrag(e) {
+        if (!draggingRow) return;
+        if (pointerId !== null && e.pointerId !== pointerId) return;
+
+        e.preventDefault();
+
+        try { handleEl.releasePointerCapture(pointerId); } catch {}
+
+        draggingRow.classList.remove("dragging");
+        draggingRow = null;
+        pointerId = null;
+
+        handleEl.removeEventListener("pointermove", onPointerMove);
+        handleEl.removeEventListener("pointerup", endDrag);
+        handleEl.removeEventListener("pointercancel", endDrag);
 
         saveOrderFromDOM();
-      });
+      }
+
+      handleEl.addEventListener("pointerdown", (e) => {
+        if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+
+        e.preventDefault();
+
+        draggingRow = row;
+        pointerId = e.pointerId;
+
+        row.classList.add("dragging");
+
+        try { handleEl.setPointerCapture(pointerId); } catch {}
+
+        handleEl.addEventListener("pointermove", onPointerMove, { passive: false });
+        handleEl.addEventListener("pointerup", endDrag, { passive: false });
+        handleEl.addEventListener("pointercancel", endDrag, { passive: false });
+      }, { passive: false });
     }
 
     function saveOrderFromDOM() {
