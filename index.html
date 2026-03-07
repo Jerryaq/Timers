@@ -49,7 +49,7 @@
       gap: var(--gap);
       margin-bottom: var(--gap);
       user-select: none;
-      flex-wrap: nowrap; /* desktop unchanged */
+      flex-wrap: nowrap;
     }
 
     .display {
@@ -59,12 +59,9 @@
       text-align: right;
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
-
-      /* IMPORTANT: allow pointer-drag on phones */
       touch-action: none;
     }
 
-    /* Name boxes same width/height as time boxes */
     .name {
       width: var(--timew);
       height: 25px;
@@ -73,7 +70,6 @@
       text-align: left;
     }
 
-    /* small boxes: 25x25 */
     .num {
       width: 25px;
       height: 25px;
@@ -82,7 +78,6 @@
       text-align: left;
     }
 
-    /* time boxes: width controlled by --timew */
     .timebox {
       width: var(--timew);
       height: 25px;
@@ -97,12 +92,10 @@
       margin: 0;
     }
 
-    /* Counter is readonly but clickable (to decrement) */
     .counter {
       cursor: pointer;
     }
 
-    /* ---------------- MOBILE ---------------- */
     @media (max-width: 700px) {
       :root { --timew: 71px; }
 
@@ -115,7 +108,6 @@
         margin-left: calc(-1 * var(--indent));
       }
 
-      /* prevent iOS zoom */
       input, button, textarea { font-size: 16px; }
     }
   </style>
@@ -137,14 +129,11 @@
     const MAX_COUNTER = 99;
     const MIN_COUNTER = 0;
 
-    // Fixed: play 2 sounds, 0.25s apart
     const FIXED_NOTIFY_COUNT = 2;
     const FIXED_NOTIFY_DELAY_SECONDS = 0.25;
 
-    // Detect phones/tablets (coarse pointer) for touch dragging
     const IS_COARSE_POINTER = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
-    // Used to hide the desktop HTML5 drag "ghost" image
     const TRANSPARENT_IMG = (() => {
       const img = new Image();
       img.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
@@ -160,8 +149,6 @@
       return String(d.getFullYear()) + "-" + pad2str(d.getMonth() + 1) + "-" + pad2str(d.getDate());
     }
 
-    // ---- Sound + Notification (GitHub Pages friendly) ----
-    // IMPORTANT: Put "Notification.wav" next to this HTML file (same exact lowercase name).
     const SOUND_URL = new URL("Notification.wav", document.baseURI).href;
 
     let audioUnlocked = false;
@@ -171,7 +158,6 @@
       if (audioUnlocked) return;
       audioUnlocked = true;
 
-      // Unlock WebAudio (helps iOS/Safari + autoplay rules)
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (Ctx) {
@@ -185,7 +171,6 @@
         }
       } catch {}
 
-      // Preload sound (best effort)
       try {
         const a = new Audio(SOUND_URL);
         a.preload = "auto";
@@ -196,17 +181,15 @@
         }).catch(() => {});
       } catch {}
 
-      // Ask notification permission on first interaction (best effort)
       ensureNotificationPermission();
     }
 
-    // Any user gesture will unlock audio + allow notifications
     document.addEventListener("pointerdown", unlockAudioOnce, { once: true });
     document.addEventListener("keydown", unlockAudioOnce, { once: true });
 
     function ensureNotificationPermission() {
       if (!("Notification" in window)) return;
-      if (!window.isSecureContext) return; // Notifications require HTTPS or localhost
+      if (!window.isSecureContext) return;
       if (Notification.permission === "default") {
         Notification.requestPermission().catch(() => {});
       }
@@ -232,11 +215,9 @@
     }
 
     function getSessionKey() {
-      // Single storage key
       return STORAGE_KEY_BASE;
     }
 
-    // --------- Daily counter reset (12:00 AM local) ---------
     function getCounterResetKey() {
       return getSessionKey() + "__counter_reset_day";
     }
@@ -245,6 +226,7 @@
       for (let i = 0; i < items.length; i++) {
         items[i].counter = 0;
       }
+
       saveState(items);
 
       const counterEls = Array.from(timersContainer.querySelectorAll("input.counter"));
@@ -253,10 +235,24 @@
       }
     }
 
+    function initCounterResetDay() {
+      const key = getCounterResetKey();
+      const today = todayStampLocal();
+
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, today);
+      }
+    }
+
     function maybeResetCountersForNewDay() {
       const key = getCounterResetKey();
       const today = todayStampLocal();
       const last = localStorage.getItem(key) || "";
+
+      if (last === "") {
+        localStorage.setItem(key, today);
+        return;
+      }
 
       if (last !== today) {
         resetAllCountersNow();
@@ -264,21 +260,12 @@
       }
     }
 
-    function msUntilNextLocalMidnight() {
-      const now = new Date();
-      const next = new Date(now);
-      next.setHours(24, 0, 0, 0);
-      return Math.max(1000, next.getTime() - now.getTime());
-    }
-
-    function scheduleMidnightCounterReset() {
-      setTimeout(() => {
+    function startCounterResetWatcher() {
+      setInterval(() => {
         maybeResetCountersForNewDay();
-        scheduleMidnightCounterReset();
-      }, msUntilNextLocalMidnight());
+      }, 1000);
     }
 
-    // Extra reliability: browsers may throttle timers in background/sleep
     window.addEventListener("focus", () => {
       maybeResetCountersForNewDay();
     });
@@ -287,7 +274,6 @@
       if (!document.hidden) maybeResetCountersForNewDay();
     });
 
-    // --------- Drag order persistence ---------
     function getOrderKey() {
       return getSessionKey() + "__order";
     }
@@ -359,7 +345,6 @@
       blankIfZeroNumberInput(el, out);
     }
 
-    // --------- Time input parsing: "1:23:42" (also allows "23:42" or "42") ---------
     function parseTimeToSeconds(raw) {
       const s = String(raw || "").trim();
       if (s === "") return { blank: true, seconds: 0 };
@@ -371,7 +356,9 @@
         if (!/^\d+$/.test(parts[i])) return { blank: false, seconds: 0, invalid: true };
       }
 
-      let h = 0, m = 0, sec = 0;
+      let h = 0;
+      let m = 0;
+      let sec = 0;
 
       if (parts.length === 3) {
         h = Number(parts[0]);
@@ -455,21 +442,16 @@
       });
     }
 
-    // -------------------- DRAG & DROP (HANDLE-ONLY) --------------------
-    // Desktop: HTML5 drag/drop (no ghost image)
-    // Mobile: pointer-based drag (no visual changes)
     let draggingId = null;
 
     function enableDragDrop(row, handleEl) {
       if (!IS_COARSE_POINTER) {
-        // Desktop / mouse
         handleEl.draggable = true;
 
         handleEl.addEventListener("dragstart", (e) => {
           draggingId = Number(row.dataset.itemId);
           e.dataTransfer.effectAllowed = "move";
 
-          // Hide drag "ghost" preview (raw)
           try {
             e.dataTransfer.setDragImage(TRANSPARENT_IMG, 0, 0);
           } catch {}
@@ -508,7 +490,6 @@
         return;
       }
 
-      // Mobile / touch: pointer dragging on handle only (raw)
       let draggingRow = null;
       let pointerId = null;
 
@@ -714,7 +695,6 @@
       }
     }
 
-    // -------------------- SAVE EVERYTHING (MOBILE SAFE) --------------------
     function saveAllFromDOM() {
       const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
 
@@ -736,7 +716,6 @@
         item.bStr = timeB ? String(timeB.value || "") : (item.bStr || "");
 
         item.counter = Math.min(MAX_COUNTER, Math.max(0, Number(counterInput && counterInput.value !== "" ? counterInput.value : 0)));
-
         item.notifyEnabled = Boolean(notifyCb && notifyCb.checked);
         item.loopEnabled = Boolean(loopCb && loopCb.checked);
         item.intervalEnabled = Boolean(intervalCb && intervalCb.checked);
@@ -745,7 +724,6 @@
       saveState(items);
     }
 
-    // Save immediately when user edits (fixes iOS cases where refresh skips blur/unload)
     document.addEventListener("input", (e) => {
       const t = e.target;
       if (!t) return;
@@ -774,7 +752,6 @@
       if (document.hidden) saveAllFromDOM();
     });
 
-    // -------------------- TIMER ROWS --------------------
     function createRandomTimerRow(data) {
       const id = data.id;
 
@@ -785,16 +762,11 @@
       row.innerHTML = `
         <div class="display" id="rDisplay${id}">00:00:00</div>
         <input class="name" id="rName${id}" type="text">
-
         <input class="timebox" id="rTimeA${id}" type="text" inputmode="numeric" placeholder="">
         <input class="timebox" id="rTimeB${id}" type="text" inputmode="numeric" placeholder="">
-
         <input class="num counter" id="rCounter${id}" type="number" min="0" max="${MAX_COUNTER}" readonly tabindex="-1">
-
-        <!-- reset then start -->
         <input class="cb" id="rReset${id}" type="checkbox">
         <input class="cb" id="rRun${id}" type="checkbox">
-
         <input class="cb" id="rNotify${id}" type="checkbox">
         <input class="cb" id="rLoop${id}" type="checkbox">
         <input class="cb" id="rInterval${id}" type="checkbox">
@@ -806,15 +778,11 @@
       enableDragDrop(row, display);
 
       const nameInput = document.getElementById(`rName${id}`);
-
       const timeA = document.getElementById(`rTimeA${id}`);
       const timeB = document.getElementById(`rTimeB${id}`);
-
       const counterInput = document.getElementById(`rCounter${id}`);
-
       const resetCb = document.getElementById(`rReset${id}`);
       const runCb = document.getElementById(`rRun${id}`);
-
       const notifyCb = document.getElementById(`rNotify${id}`);
       const loopCb = document.getElementById(`rLoop${id}`);
       const intervalCb = document.getElementById(`rInterval${id}`);
@@ -828,12 +796,10 @@
 
       let totalSeconds = Number(data.totalSeconds || 0);
       let intervalId = null;
-
       let hasStarted = Boolean(data.hasStarted);
       let intervalPhase = (data.intervalPhase === "B") ? "B" : "A";
       let runningBaseSeconds = Number(data.runningBaseSeconds || 0);
       let runningStartAt = Number(data.runningStartAt || 0);
-
       let soundTimeoutIds = [];
       let alive = true;
 
@@ -860,10 +826,28 @@
         }
       }
 
+      function getNotificationTitle() {
+        const rawName = String(nameInput.value || "").trim();
+        if (rawName === "") return "Timer";
+        return rawName;
+      }
+
+      function getFinishedDurationText() {
+        if (intervalCb.checked && !isABlank() && !isBBlank()) {
+          if (intervalPhase === "A") return formatHMSFixed(getASeconds());
+          return formatHMSFixed(getBSeconds());
+        }
+
+        if (!isABlank() && isBBlank()) return formatHMSFixed(getASeconds());
+        if (isABlank() && !isBBlank()) return formatHMSFixed(getBSeconds());
+
+        return formatHMSFixed(runningBaseSeconds);
+      }
+
       function notifyBrowserFinished() {
-        const timerName = (nameInput.value || "").trim();
-        const title = timerName ? timerName : "Timer";
-        showBrowserNotification(title, "");
+        const title = getNotificationTitle();
+        const body = getFinishedDurationText();
+        showBrowserNotification(title, body);
       }
 
       function computeRunningSeconds() {
@@ -925,14 +909,11 @@
         item.name = nameInput.value || "";
         item.aStr = String(timeA.value || "");
         item.bStr = String(timeB.value || "");
-
         item.loopEnabled = loopCb.checked;
         item.notifyEnabled = notifyCb.checked;
         item.intervalEnabled = intervalCb.checked;
         item.intervalPhase = intervalPhase;
-
         item.counter = Math.min(MAX_COUNTER, Math.max(0, Number(counterInput.value === "" ? 0 : counterInput.value)));
-
         item.totalSeconds = totalSeconds;
         item.mode = mode;
         item.hasStarted = hasStarted;
@@ -961,6 +942,8 @@
 
       function tick() {
         if (!alive) return;
+
+        maybeResetCountersForNewDay();
 
         totalSeconds = computeRunningSeconds();
         render();
@@ -1033,12 +1016,10 @@
       function startRunning() {
         stopInterval();
         clearAllSoundTimers();
-
         unlockAudioOnce();
 
         if (!hasStarted) {
           const bothSet = !isABlank() && !isBBlank();
-
           let startSeconds = 0;
 
           if (intervalCb.checked && bothSet) {
@@ -1119,7 +1100,6 @@
       }
 
       nameInput.value = data.name || "";
-
       timeA.value = String(data.aStr || "");
       timeB.value = String(data.bStr || "");
 
@@ -1141,7 +1121,6 @@
 
       armOneShotCheckbox(resetCb, reset);
 
-      // click counter to decrement
       counterInput.addEventListener("click", () => {
         decCounterBy1();
         snapshot(intervalId !== null ? "running" : "idle");
@@ -1169,22 +1148,24 @@
 
       timeA.addEventListener("input", onInputsChangedIdle);
       timeB.addEventListener("input", onInputsChangedIdle);
-
       timeA.addEventListener("change", onInputsChangedIdle);
       timeB.addEventListener("change", onInputsChangedIdle);
-
-      // Extra: catch iOS odd cases when clearing via keyboard actions
       timeA.addEventListener("keyup", onInputsChangedIdle);
       timeB.addEventListener("keyup", onInputsChangedIdle);
-
       timeA.addEventListener("paste", onInputsChangedIdle);
       timeB.addEventListener("paste", onInputsChangedIdle);
-
       timeA.addEventListener("cut", onInputsChangedIdle);
       timeB.addEventListener("cut", onInputsChangedIdle);
 
-      timeA.addEventListener("blur", () => { normalizeTimeBox(timeA); snapshot(intervalId !== null ? "running" : "idle"); });
-      timeB.addEventListener("blur", () => { normalizeTimeBox(timeB); snapshot(intervalId !== null ? "running" : "idle"); });
+      timeA.addEventListener("blur", () => {
+        normalizeTimeBox(timeA);
+        snapshot(intervalId !== null ? "running" : "idle");
+      });
+
+      timeB.addEventListener("blur", () => {
+        normalizeTimeBox(timeB);
+        snapshot(intervalId !== null ? "running" : "idle");
+      });
 
       if (data.mode === "running" && typeof data.runningStartAt === "number" && typeof data.runningBaseSeconds === "number") {
         runningBaseSeconds = Number(data.runningBaseSeconds || 0);
@@ -1228,9 +1209,9 @@
       }
     }
 
-    // -------- Initial render + midnight schedule --------
+    initCounterResetDay();
     maybeResetCountersForNewDay();
-    scheduleMidnightCounterReset();
+    startCounterResetWatcher();
 
     renderAllTimers();
   </script>
