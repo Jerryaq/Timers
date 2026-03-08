@@ -144,11 +144,6 @@
       return String(n).padStart(2, "0");
     }
 
-    function todayStampLocal() {
-      const d = new Date();
-      return String(d.getFullYear()) + "-" + pad2str(d.getMonth() + 1) + "-" + pad2str(d.getDate());
-    }
-
     const SOUND_URL = new URL("Notification.wav", document.baseURI).href;
 
     let audioUnlocked = false;
@@ -217,62 +212,6 @@
     function getSessionKey() {
       return STORAGE_KEY_BASE;
     }
-
-    function getCounterResetKey() {
-      return getSessionKey() + "__counter_reset_day";
-    }
-
-    function resetAllCountersNow() {
-      for (let i = 0; i < items.length; i++) {
-        items[i].counter = 0;
-      }
-
-      saveState(items);
-
-      const counterEls = Array.from(timersContainer.querySelectorAll("input.counter"));
-      for (let i = 0; i < counterEls.length; i++) {
-        counterEls[i].value = "";
-      }
-    }
-
-    function initCounterResetDay() {
-      const key = getCounterResetKey();
-      const today = todayStampLocal();
-
-      if (!localStorage.getItem(key)) {
-        localStorage.setItem(key, today);
-      }
-    }
-
-    function maybeResetCountersForNewDay() {
-      const key = getCounterResetKey();
-      const today = todayStampLocal();
-      const last = localStorage.getItem(key) || "";
-
-      if (last === "") {
-        localStorage.setItem(key, today);
-        return;
-      }
-
-      if (last !== today) {
-        resetAllCountersNow();
-        localStorage.setItem(key, today);
-      }
-    }
-
-    function startCounterResetWatcher() {
-      setInterval(() => {
-        maybeResetCountersForNewDay();
-      }, 1000);
-    }
-
-    window.addEventListener("focus", () => {
-      maybeResetCountersForNewDay();
-    });
-
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) maybeResetCountersForNewDay();
-    });
 
     function getOrderKey() {
       return getSessionKey() + "__order";
@@ -943,8 +882,6 @@
       function tick() {
         if (!alive) return;
 
-        maybeResetCountersForNewDay();
-
         totalSeconds = computeRunningSeconds();
         render();
         snapshot("running");
@@ -1202,16 +1139,10 @@
       teardownAllRows();
       items = ensureState();
 
-      maybeResetCountersForNewDay();
-
       for (let i = 0; i < items.length; i++) {
         createRandomTimerRow(items[i]);
       }
     }
-
-    initCounterResetDay();
-    maybeResetCountersForNewDay();
-    startCounterResetWatcher();
 
     renderAllTimers();
   </script>
