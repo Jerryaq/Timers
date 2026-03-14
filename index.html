@@ -9,10 +9,7 @@
     :root {
       --displayw: 80px;
       --gap: 5px;
-
-      /* Name width matches timebox width */
       --timew: 66px;
-
       --indent: calc(var(--displayw) + (2 * var(--gap)));
     }
 
@@ -27,7 +24,6 @@
       font-size: 15px;
     }
 
-    /* Remove number input spinners */
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button {
       -webkit-appearance: none;
@@ -140,14 +136,104 @@
       return img;
     })();
 
-    function pad2str(n) {
-      return String(n).padStart(2, "0");
-    }
-
     const SOUND_URL = new URL("Notification.wav", document.baseURI).href;
 
     let audioUnlocked = false;
     let audioCtx = null;
+    let draggingId = null;
+
+    function pad2(n) {
+      return String(n).padStart(2, "0");
+    }
+
+    function formatHMSFixed(totalSeconds) {
+      const t = Math.max(0, Math.floor(totalSeconds));
+      const h = Math.floor(t / 3600);
+      const m = Math.floor((t % 3600) / 60);
+      const s = t % 60;
+      const hh = h < 100 ? pad2(h) : String(h);
+      return hh + ":" + pad2(m) + ":" + pad2(s);
+    }
+
+    function formatTimeForBox(totalSeconds) {
+      const t = Math.max(0, Math.floor(totalSeconds));
+      const h = Math.floor(t / 3600);
+      const m = Math.floor((t % 3600) / 60);
+      const s = t % 60;
+      const hh = h < 10 ? "0" + h : String(h);
+      return hh + ":" + pad2(m) + ":" + pad2(s);
+    }
+
+    function blankIfZeroNumberInput(el, value) {
+      if (value === 0) el.value = "";
+      else el.value = value;
+    }
+
+    function setInitialBlankZeroInt(el, v, max) {
+      const n = Math.floor(Number(v || 0));
+      const out = Math.min(max, Math.max(MIN_COUNTER, n));
+      blankIfZeroNumberInput(el, out);
+    }
+
+    function parseTimeToSeconds(raw) {
+      const s = String(raw || "").trim();
+      if (s === "") return { blank: true, seconds: 0 };
+
+      const parts = s.split(":").map((p) => p.trim()).filter((p) => p !== "");
+      if (parts.length === 0 || parts.length > 3) return { blank: false, seconds: 0, invalid: true };
+
+      for (let i = 0; i < parts.length; i++) {
+        if (!/^\d+$/.test(parts[i])) return { blank: false, seconds: 0, invalid: true };
+      }
+
+      let h = 0;
+      let m = 0;
+      let sec = 0;
+
+      if (parts.length === 3) {
+        h = Number(parts[0]);
+        m = Number(parts[1]);
+        sec = Number(parts[2]);
+      } else if (parts.length === 2) {
+        m = Number(parts[0]);
+        sec = Number(parts[1]);
+      } else {
+        sec = Number(parts[0]);
+      }
+
+      h = Math.min(MAX_HOURS, Math.max(0, Math.floor(h)));
+      m = Math.min(MAX_MINUTES, Math.max(0, Math.floor(m)));
+      sec = Math.min(MAX_SECONDS, Math.max(0, Math.floor(sec)));
+
+      return { blank: false, seconds: h * 3600 + m * 60 + sec };
+    }
+
+    function normalizeTimeBox(el) {
+      const parsed = parseTimeToSeconds(el.value);
+      if (parsed.blank || parsed.invalid) {
+        el.value = "";
+        return 0;
+      }
+      el.value = formatTimeForBox(parsed.seconds);
+      return parsed.seconds;
+    }
+
+    function blockTimeTyping(el) {
+      el.addEventListener("keydown", (e) => {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        const okKeys = [
+          "Backspace", "Delete", "Tab", "Escape", "Enter",
+          "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"
+        ];
+        if (okKeys.includes(e.key)) return;
+
+        if (e.key >= "0" && e.key <= "9") return;
+        if (e.key === ":") return;
+
+        e.preventDefault();
+      });
+    }
 
     function unlockAudioOnce() {
       if (audioUnlocked) return;
@@ -209,6 +295,10 @@
       } catch {}
     }
 
+    function getNotifySettingsFixed() {
+      return { count: FIXED_NOTIFY_COUNT, delay: FIXED_NOTIFY_DELAY_SECONDS };
+    }
+
     function getSessionKey() {
       return STORAGE_KEY_BASE;
     }
@@ -239,7 +329,9 @@
       if (!order || order.length === 0) return itemsArr;
 
       const byId = new Map();
-      for (let i = 0; i < itemsArr.length; i++) byId.set(itemsArr[i].id, itemsArr[i]);
+      for (let i = 0; i < itemsArr.length; i++) {
+        byId.set(itemsArr[i].id, itemsArr[i]);
+      }
 
       const out = [];
       const used = new Set();
@@ -260,115 +352,6 @@
       return out;
     }
 
-    function pad2(n) {
-      return String(n).padStart(2, "0");
-    }
-
-    function formatHMSFixed(totalSeconds) {
-      const t = Math.max(0, Math.floor(totalSeconds));
-      const h = Math.floor(t / 3600);
-      const m = Math.floor((t % 3600) / 60);
-      const s = t % 60;
-      const hh = (h < 100) ? pad2(h) : String(h);
-      return hh + ":" + pad2(m) + ":" + pad2(s);
-    }
-
-    function blankIfZeroNumberInput(el, value) {
-      if (value === 0) el.value = "";
-      else el.value = value;
-    }
-
-    function setInitialBlankZeroInt(el, v, max) {
-      const n = Math.floor(Number(v || 0));
-      const out = Math.min(max, Math.max(MIN_COUNTER, n));
-      blankIfZeroNumberInput(el, out);
-    }
-
-    function parseTimeToSeconds(raw) {
-      const s = String(raw || "").trim();
-      if (s === "") return { blank: true, seconds: 0 };
-
-      const parts = s.split(":").map((p) => p.trim()).filter((p) => p !== "");
-      if (parts.length === 0 || parts.length > 3) return { blank: false, seconds: 0, invalid: true };
-
-      for (let i = 0; i < parts.length; i++) {
-        if (!/^\d+$/.test(parts[i])) return { blank: false, seconds: 0, invalid: true };
-      }
-
-      let h = 0;
-      let m = 0;
-      let sec = 0;
-
-      if (parts.length === 3) {
-        h = Number(parts[0]);
-        m = Number(parts[1]);
-        sec = Number(parts[2]);
-      } else if (parts.length === 2) {
-        m = Number(parts[0]);
-        sec = Number(parts[1]);
-      } else {
-        sec = Number(parts[0]);
-      }
-
-      h = Math.min(MAX_HOURS, Math.max(0, Math.floor(h)));
-      m = Math.min(MAX_MINUTES, Math.max(0, Math.floor(m)));
-      sec = Math.min(MAX_SECONDS, Math.max(0, Math.floor(sec)));
-
-      return { blank: false, seconds: h * 3600 + m * 60 + sec };
-    }
-
-    function formatTimeForBox(totalSeconds) {
-      const t = Math.max(0, Math.floor(totalSeconds));
-      const h = Math.floor(t / 3600);
-      const m = Math.floor((t % 3600) / 60);
-      const s = t % 60;
-
-      const hh = (h < 10) ? "0" + h : String(h);
-
-      return hh + ":" + pad2(m) + ":" + pad2(s);
-    }
-
-    function normalizeTimeBox(el) {
-      const parsed = parseTimeToSeconds(el.value);
-      if (parsed.blank) {
-        el.value = "";
-        return 0;
-      }
-      if (parsed.invalid) {
-        el.value = "";
-        return 0;
-      }
-      el.value = formatTimeForBox(parsed.seconds);
-      return parsed.seconds;
-    }
-
-    function blockTimeTyping(el) {
-      el.addEventListener("keydown", (e) => {
-        if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-        const okKeys = [
-          "Backspace", "Delete", "Tab", "Escape", "Enter",
-          "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"
-        ];
-        if (okKeys.includes(e.key)) return;
-
-        if (e.key >= "0" && e.key <= "9") return;
-        if (e.key === ":") return;
-
-        e.preventDefault();
-      });
-    }
-
-    function randomIntInclusive(a, b) {
-      const lo = Math.min(a, b);
-      const hi = Math.max(a, b);
-      return lo + Math.floor(Math.random() * (hi - lo + 1));
-    }
-
-    function getNotifySettingsFixed() {
-      return { count: FIXED_NOTIFY_COUNT, delay: FIXED_NOTIFY_DELAY_SECONDS };
-    }
-
     function setCheckboxChecked(cb, checked) {
       cb.checked = Boolean(checked);
     }
@@ -380,8 +363,6 @@
         cb.checked = false;
       });
     }
-
-    let draggingId = null;
 
     function enableDragDrop(row, handleEl) {
       if (!IS_COARSE_POINTER) {
@@ -491,25 +472,6 @@
       }, { passive: false });
     }
 
-    function saveOrderFromDOM() {
-      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
-      const newOrder = [];
-      const orderIds = [];
-
-      for (let i = 0; i < rows.length; i++) {
-        const id = Number(rows[i].dataset.itemId);
-        const item = getItemById(id);
-        if (item) {
-          newOrder.push(item);
-          orderIds.push(id);
-        }
-      }
-
-      items = newOrder;
-      saveOrder(orderIds);
-      saveState(items);
-    }
-
     function loadState() {
       const raw = localStorage.getItem(getSessionKey());
       if (!raw) return null;
@@ -530,18 +492,14 @@
     function defaultItem(id) {
       return {
         id: id,
-        type: "randomTimer",
         name: "",
-        aStr: "",
-        bStr: "",
+        timeStr: "",
         counter: 0,
         totalSeconds: 0,
         mode: "idle",
         hasStarted: false,
-        loopEnabled: false,
         notifyEnabled: false,
-        intervalEnabled: false,
-        intervalPhase: "A",
+        loopEnabled: false,
         runningBaseSeconds: 0,
         runningStartAt: 0
       };
@@ -550,30 +508,20 @@
     function clampSavedItem(item) {
       const out = Object.assign(defaultItem(item.id), item);
 
-      const hasOldA = (out.hA !== undefined || out.mA !== undefined || out.sA !== undefined);
-      const hasOldB = (out.hB !== undefined || out.mB !== undefined || out.sB !== undefined);
-
-      if (!out.aStr && hasOldA) {
-        const h = Math.min(MAX_HOURS, Math.max(0, Number(out.hA || 0)));
-        const m = Math.min(MAX_MINUTES, Math.max(0, Number(out.mA || 0)));
-        const s = Math.min(MAX_SECONDS, Math.max(0, Number(out.sA || 0)));
-        if (h !== 0 || m !== 0 || s !== 0) out.aStr = String(h) + ":" + pad2(m) + ":" + pad2(s);
+      if (!out.timeStr) {
+        if (out.aStr) out.timeStr = String(out.aStr);
+        else if (out.hA !== undefined || out.mA !== undefined || out.sA !== undefined) {
+          const h = Math.min(MAX_HOURS, Math.max(0, Number(out.hA || 0)));
+          const m = Math.min(MAX_MINUTES, Math.max(0, Number(out.mA || 0)));
+          const s = Math.min(MAX_SECONDS, Math.max(0, Number(out.sA || 0)));
+          if (h !== 0 || m !== 0 || s !== 0) out.timeStr = String(h) + ":" + pad2(m) + ":" + pad2(s);
+        }
       }
 
-      if (!out.bStr && hasOldB) {
-        const h = Math.min(MAX_HOURS, Math.max(0, Number(out.hB || 0)));
-        const m = Math.min(MAX_MINUTES, Math.max(0, Number(out.mB || 0)));
-        const s = Math.min(MAX_SECONDS, Math.max(0, Number(out.sB || 0)));
-        if (h !== 0 || m !== 0 || s !== 0) out.bStr = String(h) + ":" + pad2(m) + ":" + pad2(s);
-      }
-
-      out.aStr = String(out.aStr || "");
-      out.bStr = String(out.bStr || "");
-
+      out.timeStr = String(out.timeStr || "");
       out.counter = Math.min(MAX_COUNTER, Math.max(0, Number(out.counter || 0)));
-
-      out.intervalEnabled = Boolean(out.intervalEnabled);
-      out.intervalPhase = (out.intervalPhase === "B") ? "B" : "A";
+      out.notifyEnabled = Boolean(out.notifyEnabled);
+      out.loopEnabled = Boolean(out.loopEnabled);
 
       return out;
     }
@@ -583,7 +531,9 @@
 
       if (!stored) {
         let fresh = [];
-        for (let i = 0; i < TIMER_COUNT; i++) fresh.push(defaultItem(i + 1));
+        for (let i = 0; i < TIMER_COUNT; i++) {
+          fresh.push(defaultItem(i + 1));
+        }
         fresh = applyOrder(fresh);
         saveState(fresh);
         return fresh;
@@ -634,6 +584,25 @@
       }
     }
 
+    function saveOrderFromDOM() {
+      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+      const newOrder = [];
+      const orderIds = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const id = Number(rows[i].dataset.itemId);
+        const item = getItemById(id);
+        if (item) {
+          newOrder.push(item);
+          orderIds.push(id);
+        }
+      }
+
+      items = newOrder;
+      saveOrder(orderIds);
+      saveState(items);
+    }
+
     function saveAllFromDOM() {
       const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
 
@@ -643,21 +612,16 @@
         if (!item) continue;
 
         const nameInput = rows[i].querySelector(`#rName${id}`);
-        const timeA = rows[i].querySelector(`#rTimeA${id}`);
-        const timeB = rows[i].querySelector(`#rTimeB${id}`);
+        const timeInput = rows[i].querySelector(`#rTime${id}`);
         const counterInput = rows[i].querySelector(`#rCounter${id}`);
         const notifyCb = rows[i].querySelector(`#rNotify${id}`);
         const loopCb = rows[i].querySelector(`#rLoop${id}`);
-        const intervalCb = rows[i].querySelector(`#rInterval${id}`);
 
         item.name = nameInput ? (nameInput.value || "") : (item.name || "");
-        item.aStr = timeA ? String(timeA.value || "") : (item.aStr || "");
-        item.bStr = timeB ? String(timeB.value || "") : (item.bStr || "");
-
+        item.timeStr = timeInput ? String(timeInput.value || "") : (item.timeStr || "");
         item.counter = Math.min(MAX_COUNTER, Math.max(0, Number(counterInput && counterInput.value !== "" ? counterInput.value : 0)));
         item.notifyEnabled = Boolean(notifyCb && notifyCb.checked);
         item.loopEnabled = Boolean(loopCb && loopCb.checked);
-        item.intervalEnabled = Boolean(intervalCb && intervalCb.checked);
       }
 
       saveState(items);
@@ -691,7 +655,7 @@
       if (document.hidden) saveAllFromDOM();
     });
 
-    function createRandomTimerRow(data) {
+    function createTimerRow(data) {
       const id = data.id;
 
       const row = document.createElement("div");
@@ -701,14 +665,12 @@
       row.innerHTML = `
         <div class="display" id="rDisplay${id}">00:00:00</div>
         <input class="name" id="rName${id}" type="text">
-        <input class="timebox" id="rTimeA${id}" type="text" inputmode="numeric" placeholder="">
-        <input class="timebox" id="rTimeB${id}" type="text" inputmode="numeric" placeholder="">
+        <input class="timebox" id="rTime${id}" type="text" inputmode="numeric" placeholder="">
         <input class="num counter" id="rCounter${id}" type="number" min="0" max="${MAX_COUNTER}" readonly tabindex="-1">
         <input class="cb" id="rReset${id}" type="checkbox">
         <input class="cb" id="rRun${id}" type="checkbox">
         <input class="cb" id="rNotify${id}" type="checkbox">
         <input class="cb" id="rLoop${id}" type="checkbox">
-        <input class="cb" id="rInterval${id}" type="checkbox">
       `;
 
       timersContainer.appendChild(row);
@@ -717,17 +679,14 @@
       enableDragDrop(row, display);
 
       const nameInput = document.getElementById(`rName${id}`);
-      const timeA = document.getElementById(`rTimeA${id}`);
-      const timeB = document.getElementById(`rTimeB${id}`);
+      const timeInput = document.getElementById(`rTime${id}`);
       const counterInput = document.getElementById(`rCounter${id}`);
       const resetCb = document.getElementById(`rReset${id}`);
       const runCb = document.getElementById(`rRun${id}`);
       const notifyCb = document.getElementById(`rNotify${id}`);
       const loopCb = document.getElementById(`rLoop${id}`);
-      const intervalCb = document.getElementById(`rInterval${id}`);
 
-      blockTimeTyping(timeA);
-      blockTimeTyping(timeB);
+      blockTimeTyping(timeInput);
 
       counterInput.addEventListener("keydown", (e) => e.preventDefault());
       counterInput.addEventListener("paste", (e) => e.preventDefault());
@@ -736,7 +695,6 @@
       let totalSeconds = Number(data.totalSeconds || 0);
       let intervalId = null;
       let hasStarted = Boolean(data.hasStarted);
-      let intervalPhase = (data.intervalPhase === "B") ? "B" : "A";
       let runningBaseSeconds = Number(data.runningBaseSeconds || 0);
       let runningStartAt = Number(data.runningStartAt || 0);
       let soundTimeoutIds = [];
@@ -772,14 +730,6 @@
       }
 
       function getFinishedDurationText() {
-        if (intervalCb.checked && !isABlank() && !isBBlank()) {
-          if (intervalPhase === "A") return formatHMSFixed(getASeconds());
-          return formatHMSFixed(getBSeconds());
-        }
-
-        if (!isABlank() && isBBlank()) return formatHMSFixed(getASeconds());
-        if (isABlank() && !isBBlank()) return formatHMSFixed(getBSeconds());
-
         return formatHMSFixed(runningBaseSeconds);
       }
 
@@ -794,39 +744,10 @@
         return Math.max(0, runningBaseSeconds - elapsed);
       }
 
-      function isABlank() {
-        return String(timeA.value || "").trim() === "";
-      }
-
-      function isBBlank() {
-        return String(timeB.value || "").trim() === "";
-      }
-
-      function getASeconds() {
-        const p = parseTimeToSeconds(timeA.value);
+      function getTimeSeconds() {
+        const p = parseTimeToSeconds(timeInput.value);
         if (p.blank || p.invalid) return 0;
         return p.seconds;
-      }
-
-      function getBSeconds() {
-        const p = parseTimeToSeconds(timeB.value);
-        if (p.blank || p.invalid) return 0;
-        return p.seconds;
-      }
-
-      function pickSecondsRandom() {
-        const aBlank = isABlank();
-        const bBlank = isBBlank();
-
-        if (!aBlank && bBlank) return getASeconds();
-        if (aBlank && !bBlank) return getBSeconds();
-        if (!aBlank && !bBlank) {
-          const a = getASeconds();
-          const b = getBSeconds();
-          return randomIntInclusive(a, b);
-        }
-
-        return 0;
       }
 
       function incCounterBy1() {
@@ -846,12 +767,9 @@
         if (!alive || !item) return;
 
         item.name = nameInput.value || "";
-        item.aStr = String(timeA.value || "");
-        item.bStr = String(timeB.value || "");
-        item.loopEnabled = loopCb.checked;
+        item.timeStr = String(timeInput.value || "");
         item.notifyEnabled = notifyCb.checked;
-        item.intervalEnabled = intervalCb.checked;
-        item.intervalPhase = intervalPhase;
+        item.loopEnabled = loopCb.checked;
         item.counter = Math.min(MAX_COUNTER, Math.max(0, Number(counterInput.value === "" ? 0 : counterInput.value)));
         item.totalSeconds = totalSeconds;
         item.mode = mode;
@@ -873,7 +791,6 @@
         stopInterval();
         setCheckboxChecked(runCb, false);
         hasStarted = false;
-        intervalPhase = "A";
         runningBaseSeconds = 0;
         runningStartAt = 0;
         snapshot("idle");
@@ -899,43 +816,8 @@
             notifyBrowserFinished();
           }
 
-          const aBlank = isABlank();
-          const bBlank = isBBlank();
-          const bothSet = !aBlank && !bBlank;
-
-          if (intervalCb.checked && bothSet) {
-            if (intervalPhase === "A") {
-              intervalPhase = "B";
-              const next = getBSeconds();
-              if (next > 0) {
-                runningBaseSeconds = next;
-                runningStartAt = Date.now();
-                totalSeconds = next;
-                render();
-                snapshot("running");
-                return;
-              }
-            } else {
-              if (loopCb.checked) {
-                intervalPhase = "A";
-                const next = getASeconds();
-                if (next > 0) {
-                  runningBaseSeconds = next;
-                  runningStartAt = Date.now();
-                  totalSeconds = next;
-                  render();
-                  snapshot("running");
-                  return;
-                }
-              }
-            }
-
-            stopToIdle();
-            return;
-          }
-
           if (loopCb.checked) {
-            const next = pickSecondsRandom();
+            const next = getTimeSeconds();
             if (next > 0) {
               runningBaseSeconds = next;
               runningStartAt = Date.now();
@@ -956,17 +838,7 @@
         unlockAudioOnce();
 
         if (!hasStarted) {
-          const bothSet = !isABlank() && !isBBlank();
-          let startSeconds = 0;
-
-          if (intervalCb.checked && bothSet) {
-            intervalPhase = "A";
-            startSeconds = getASeconds();
-          } else {
-            startSeconds = pickSecondsRandom();
-          }
-
-          totalSeconds = startSeconds;
+          totalSeconds = getTimeSeconds();
 
           if (totalSeconds <= 0) {
             setCheckboxChecked(runCb, false);
@@ -1013,7 +885,6 @@
 
         setCheckboxChecked(runCb, false);
         hasStarted = false;
-        intervalPhase = "A";
         runningBaseSeconds = 0;
         runningStartAt = 0;
 
@@ -1029,7 +900,6 @@
 
         setCheckboxChecked(runCb, false);
         hasStarted = false;
-        intervalPhase = "A";
         runningBaseSeconds = 0;
         runningStartAt = 0;
 
@@ -1037,17 +907,13 @@
       }
 
       nameInput.value = data.name || "";
-      timeA.value = String(data.aStr || "");
-      timeB.value = String(data.bStr || "");
+      timeInput.value = String(data.timeStr || "");
 
-      if (String(timeA.value || "").trim() !== "") normalizeTimeBox(timeA);
-      if (String(timeB.value || "").trim() !== "") normalizeTimeBox(timeB);
+      if (String(timeInput.value || "").trim() !== "") normalizeTimeBox(timeInput);
 
       setInitialBlankZeroInt(counterInput, data.counter, MAX_COUNTER);
-
-      setCheckboxChecked(loopCb, Boolean(data.loopEnabled));
       setCheckboxChecked(notifyCb, Boolean(data.notifyEnabled));
-      setCheckboxChecked(intervalCb, Boolean(data.intervalEnabled));
+      setCheckboxChecked(loopCb, Boolean(data.loopEnabled));
 
       render();
 
@@ -1069,38 +935,25 @@
         snapshot(intervalId !== null ? "running" : "idle");
       }, { passive: false });
 
-      loopCb.addEventListener("change", () => snapshot(intervalId !== null ? "running" : "idle"));
-
       notifyCb.addEventListener("change", () => {
         if (notifyCb.checked) ensureNotificationPermission();
         snapshot(intervalId !== null ? "running" : "idle");
       });
 
-      intervalCb.addEventListener("change", () => {
-        intervalPhase = "A";
+      loopCb.addEventListener("change", () => {
         snapshot(intervalId !== null ? "running" : "idle");
       });
 
       nameInput.addEventListener("input", () => snapshot(intervalId !== null ? "running" : "idle"));
 
-      timeA.addEventListener("input", onInputsChangedIdle);
-      timeB.addEventListener("input", onInputsChangedIdle);
-      timeA.addEventListener("change", onInputsChangedIdle);
-      timeB.addEventListener("change", onInputsChangedIdle);
-      timeA.addEventListener("keyup", onInputsChangedIdle);
-      timeB.addEventListener("keyup", onInputsChangedIdle);
-      timeA.addEventListener("paste", onInputsChangedIdle);
-      timeB.addEventListener("paste", onInputsChangedIdle);
-      timeA.addEventListener("cut", onInputsChangedIdle);
-      timeB.addEventListener("cut", onInputsChangedIdle);
+      timeInput.addEventListener("input", onInputsChangedIdle);
+      timeInput.addEventListener("change", onInputsChangedIdle);
+      timeInput.addEventListener("keyup", onInputsChangedIdle);
+      timeInput.addEventListener("paste", onInputsChangedIdle);
+      timeInput.addEventListener("cut", onInputsChangedIdle);
 
-      timeA.addEventListener("blur", () => {
-        normalizeTimeBox(timeA);
-        snapshot(intervalId !== null ? "running" : "idle");
-      });
-
-      timeB.addEventListener("blur", () => {
-        normalizeTimeBox(timeB);
+      timeInput.addEventListener("blur", () => {
+        normalizeTimeBox(timeInput);
         snapshot(intervalId !== null ? "running" : "idle");
       });
 
@@ -1140,7 +993,7 @@
       items = ensureState();
 
       for (let i = 0; i < items.length; i++) {
-        createRandomTimerRow(items[i]);
+        createTimerRow(items[i]);
       }
     }
 
