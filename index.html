@@ -1,637 +1,964 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>Timers</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Timers</title>
 
-<style>
-:root{
-  --displayw:80px;
-  --gap:5px;
-  --timew:66px;
-  --indent:calc(var(--displayw) + (2 * var(--gap)));
-}
+  <style>
+    :root {
+      --displayw: 80px;
+      --gap: 5px;
+      --timew: 66px;
+      --indent: calc(var(--displayw) + (2 * var(--gap)));
+    }
 
-body{
-  font-family:Arial,sans-serif;
-  font-size:15px;
-  margin:5px;
-}
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 15px;
+      margin: 5px;
+    }
 
-input,button,textarea{
-  font-family:Arial,sans-serif;
-  font-size:15px;
-}
+    input, button, textarea {
+      font-family: Arial, sans-serif;
+      font-size: 15px;
+    }
 
-input[type="number"]::-webkit-outer-spin-button,
-input[type="number"]::-webkit-inner-spin-button{
-  -webkit-appearance:none;
-  margin:0;
-}
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
 
-input[type="number"]{
-  -moz-appearance:textfield;
-  appearance:textfield;
-}
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
 
-#timers{
-  overflow-x:visible;
-}
+    #timers {
+      overflow-x: visible;
+    }
 
-.timer-row{
-  display:flex;
-  align-items:center;
-  gap:var(--gap);
-  margin-bottom:var(--gap);
-  user-select:none;
-  flex-wrap:nowrap;
-}
+    .timer-row {
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+      margin-bottom: var(--gap);
+      user-select: none;
+      flex-wrap: nowrap;
+    }
 
-.display{
-  font-size:20px;
-  margin-right:var(--gap);
-  min-width:var(--displayw);
-  text-align:right;
-  font-variant-numeric:tabular-nums;
-  white-space:nowrap;
-  touch-action:none;
-}
+    .display {
+      font-size: 20px;
+      margin-right: var(--gap);
+      min-width: var(--displayw);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      touch-action: none;
+    }
 
-.name{
-  width:var(--timew);
-  height:25px;
-  box-sizing:border-box;
-  padding:0 2px;
-  text-align:left;
-}
+    .name {
+      width: var(--timew);
+      height: 25px;
+      box-sizing: border-box;
+      padding: 0 2px;
+      text-align: left;
+    }
 
-.timebox{
-  width:var(--timew);
-  height:25px;
-  box-sizing:border-box;
-  padding:0 2px;
-  text-align:left;
-}
+    .timebox {
+      width: var(--timew);
+      height: 25px;
+      box-sizing: border-box;
+      padding: 0 2px;
+      text-align: left;
+    }
 
-.cb{
-  width:25px;
-  height:25px;
-  margin:0;
-}
+    .cb {
+      width: 25px;
+      height: 25px;
+      margin: 0;
+    }
 
-@media (max-width:700px){
-  :root{--timew:71px;}
+    @media (max-width: 700px) {
+      :root { --timew: 71px; }
 
-  .timer-row{
-    flex-wrap:wrap;
-    padding-left:var(--indent);
-  }
+      .timer-row {
+        flex-wrap: wrap;
+        padding-left: var(--indent);
+      }
 
-  .display{
-    margin-left:calc(-1 * var(--indent));
-  }
+      .display {
+        margin-left: calc(-1 * var(--indent));
+      }
 
-  input,button,textarea{
-    font-size:16px;
-  }
-}
-</style>
+      input, button, textarea { font-size: 16px; }
+    }
+  </style>
 </head>
 <body>
 
-<div id="timers"></div>
+  <div id="timers"></div>
 
-<script>
-const timersContainer = document.getElementById("timers");
+  <script>
+    const timersContainer = document.getElementById("timers");
 
-const STORAGE_KEY_BASE = "1";
-const TIMER_COUNT = 25;
+    const STORAGE_KEY_BASE = "1";
+    const TIMER_COUNT = 25;
 
-const MAX_HOURS = 99;
-const MAX_MINUTES = 59;
-const MAX_SECONDS = 59;
+    const MAX_HOURS = 99;
+    const MAX_MINUTES = 59;
+    const MAX_SECONDS = 59;
 
-const FIXED_NOTIFY_COUNT = 2;
-const FIXED_NOTIFY_DELAY_SECONDS = 0.25;
+    const FIXED_NOTIFY_COUNT = 2;
+    const FIXED_NOTIFY_DELAY_SECONDS = 0.25;
 
-const SOUND_URL = new URL("Notification.wav", document.baseURI).href;
+    const IS_COARSE_POINTER = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
-function pad2(n){
-  return String(n).padStart(2, "0");
-}
+    const TRANSPARENT_IMG = (() => {
+      const img = new Image();
+      img.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+      return img;
+    })();
 
-function formatHMSFixed(totalSeconds){
-  const t = Math.max(0, Math.floor(totalSeconds));
-  const h = Math.floor(t / 3600);
-  const m = Math.floor((t % 3600) / 60);
-  const s = t % 60;
-  const hh = h < 100 ? pad2(h) : String(h);
-  return hh + ":" + pad2(m) + ":" + pad2(s);
-}
+    const SOUND_URL = new URL("Notification.wav", document.baseURI).href;
 
-function formatTimeForBox(totalSeconds){
-  const t = Math.max(0, Math.floor(totalSeconds));
-  const h = Math.floor(t / 3600);
-  const m = Math.floor((t % 3600) / 60);
-  const s = t % 60;
-  const hh = h < 10 ? "0" + h : String(h);
-  return hh + ":" + pad2(m) + ":" + pad2(s);
-}
+    let audioUnlocked = false;
+    let audioCtx = null;
+    let draggingId = null;
 
-function parseTimeToSeconds(raw){
-  const s = String(raw || "").trim();
-  if(s === "") return { blank: true, seconds: 0 };
-
-  const parts = s.split(":").map((p) => p.trim()).filter((p) => p !== "");
-  if(parts.length === 0 || parts.length > 3) return { blank: false, seconds: 0, invalid: true };
-
-  for(let i = 0; i < parts.length; i++){
-    if(!/^\d+$/.test(parts[i])) return { blank: false, seconds: 0, invalid: true };
-  }
-
-  let h = 0;
-  let m = 0;
-  let sec = 0;
-
-  if(parts.length === 3){
-    h = Number(parts[0]);
-    m = Number(parts[1]);
-    sec = Number(parts[2]);
-  }else if(parts.length === 2){
-    m = Number(parts[0]);
-    sec = Number(parts[1]);
-  }else{
-    sec = Number(parts[0]);
-  }
-
-  h = Math.min(MAX_HOURS, Math.max(0, Math.floor(h)));
-  m = Math.min(MAX_MINUTES, Math.max(0, Math.floor(m)));
-  sec = Math.min(MAX_SECONDS, Math.max(0, Math.floor(sec)));
-
-  return { blank: false, seconds: h * 3600 + m * 60 + sec };
-}
-
-function normalizeTimeBox(el){
-  const parsed = parseTimeToSeconds(el.value);
-
-  if(parsed.blank || parsed.invalid){
-    el.value = "";
-    return 0;
-  }
-
-  el.value = formatTimeForBox(parsed.seconds);
-  return parsed.seconds;
-}
-
-function blockTimeTyping(el){
-  el.addEventListener("keydown", (e) => {
-    if(e.ctrlKey || e.metaKey || e.altKey) return;
-
-    const okKeys = [
-      "Backspace", "Delete", "Tab", "Escape", "Enter",
-      "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"
-    ];
-
-    if(okKeys.includes(e.key)) return;
-    if(e.key >= "0" && e.key <= "9") return;
-    if(e.key === ":") return;
-
-    e.preventDefault();
-  });
-}
-
-function ensureInputShowsLeft(el){
-  requestAnimationFrame(() => {
-    el.scrollLeft = 0;
-    try{
-      el.setSelectionRange(0, 0);
-    }catch{}
-  });
-}
-
-function getSessionKey(){
-  return STORAGE_KEY_BASE;
-}
-
-function loadState(){
-  const raw = localStorage.getItem(getSessionKey());
-  if(!raw) return null;
-
-  try{
-    const parsed = JSON.parse(raw);
-    if(!Array.isArray(parsed)) return null;
-    return parsed;
-  }catch{
-    return null;
-  }
-}
-
-function saveState(items){
-  localStorage.setItem(getSessionKey(), JSON.stringify(items));
-}
-
-function defaultItem(id){
-  return {
-    id: id,
-    name: "",
-    timeStr: "",
-    totalSeconds: 0,
-    mode: "idle",
-    hasStarted: false,
-    notifyEnabled: false,
-    loopEnabled: false,
-    runningBaseSeconds: 0,
-    runningStartAt: 0
-  };
-}
-
-function ensureState(){
-  const stored = loadState();
-
-  if(!stored){
-    const fresh = [];
-
-    for(let i = 0; i < TIMER_COUNT; i++){
-      fresh.push(defaultItem(i + 1));
+    if ("scrollRestoration" in history) {
+      history.scrollRestoration = "manual";
     }
 
-    saveState(fresh);
-    return fresh;
-  }
-
-  const seen = new Set();
-  const out = [];
-
-  for(let i = 0; i < stored.length; i++){
-    const it = stored[i];
-
-    if(!it || typeof it.id !== "number") continue;
-    if(it.id < 1 || it.id > TIMER_COUNT) continue;
-    if(seen.has(it.id)) continue;
-
-    seen.add(it.id);
-    out.push(Object.assign(defaultItem(it.id), it));
-  }
-
-  for(let id = 1; id <= TIMER_COUNT; id++){
-    if(!seen.has(id)){
-      out.push(defaultItem(id));
-    }
-  }
-
-  saveState(out);
-  return out;
-}
-
-let items = ensureState();
-
-function getItemById(id){
-  for(let i = 0; i < items.length; i++){
-    if(items[i].id === id) return items[i];
-  }
-  return null;
-}
-
-function createTimerRow(data){
-  const id = data.id;
-
-  const row = document.createElement("div");
-  row.className = "timer-row";
-  row.dataset.itemId = String(id);
-
-  row.innerHTML = `
-    <div class="display" id="rDisplay${id}">00:00:00</div>
-    <input class="name" id="rName${id}" type="text">
-    <input class="timebox" id="rTime${id}" type="text" inputmode="numeric">
-    <input class="cb" id="rReset${id}" type="checkbox">
-    <input class="cb" id="rRun${id}" type="checkbox">
-    <input class="cb" id="rNotify${id}" type="checkbox">
-    <input class="cb" id="rLoop${id}" type="checkbox">
-  `;
-
-  timersContainer.appendChild(row);
-
-  const display = document.getElementById(`rDisplay${id}`);
-  const nameInput = document.getElementById(`rName${id}`);
-  const timeInput = document.getElementById(`rTime${id}`);
-  const resetCb = document.getElementById(`rReset${id}`);
-  const runCb = document.getElementById(`rRun${id}`);
-  const notifyCb = document.getElementById(`rNotify${id}`);
-  const loopCb = document.getElementById(`rLoop${id}`);
-
-  blockTimeTyping(timeInput);
-
-  let totalSeconds = Number(data.totalSeconds || 0);
-  let intervalId = null;
-  let hasStarted = Boolean(data.hasStarted);
-  let runningBaseSeconds = Number(data.runningBaseSeconds || 0);
-  let runningStartAt = Number(data.runningStartAt || 0);
-
-  function render(){
-    display.textContent = formatHMSFixed(totalSeconds);
-  }
-
-  function snapshot(mode){
-    const item = getItemById(id);
-    if(!item) return;
-
-    item.name = nameInput.value || "";
-    item.timeStr = String(timeInput.value || "");
-    item.totalSeconds = totalSeconds;
-    item.mode = mode;
-    item.hasStarted = hasStarted;
-    item.notifyEnabled = notifyCb.checked;
-    item.loopEnabled = loopCb.checked;
-    item.runningBaseSeconds = runningBaseSeconds;
-    item.runningStartAt = runningStartAt;
-
-    saveState(items);
-  }
-
-  function computeRunningSeconds(){
-    const elapsed = Math.floor((Date.now() - runningStartAt) / 1000);
-    return Math.max(0, runningBaseSeconds - elapsed);
-  }
-
-  function getTimeSeconds(){
-    const p = parseTimeToSeconds(timeInput.value);
-    if(p.blank || p.invalid) return 0;
-    return p.seconds;
-  }
-
-  function getNotificationTitle(){
-    const name = String(nameInput.value || "").trim();
-    if(name === "") return "Timer";
-    return name;
-  }
-
-  function showBrowserNotification(){
-    if(!("Notification" in window)) return;
-    if(!window.isSecureContext) return;
-    if(Notification.permission !== "granted") return;
-
-    try{
-      new Notification(getNotificationTitle());
-    }catch{}
-  }
-
-  function maybeRequestNotificationPermission(){
-    if(!("Notification" in window)) return;
-    if(!window.isSecureContext) return;
-    if(Notification.permission === "default"){
-      Notification.requestPermission().catch(() => {});
-    }
-  }
-
-  function playNotification(){
-    for(let i = 0; i < FIXED_NOTIFY_COUNT; i++){
-      const ms = Math.round(i * FIXED_NOTIFY_DELAY_SECONDS * 1000);
-
-      setTimeout(() => {
-        const audio = new Audio(SOUND_URL);
-        audio.play().catch(() => {});
-      }, ms);
+    function forceScrollLeft() {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollLeft = 0;
+      document.body.scrollLeft = 0;
+      timersContainer.scrollLeft = 0;
     }
 
-    showBrowserNotification();
-  }
+    function pad2(n) {
+      return String(n).padStart(2, "0");
+    }
 
-  function tick(){
-    totalSeconds = computeRunningSeconds();
-    render();
-    snapshot("running");
+    function formatHMSFixed(totalSeconds) {
+      const t = Math.max(0, Math.floor(totalSeconds));
+      const h = Math.floor(t / 3600);
+      const m = Math.floor((t % 3600) / 60);
+      const s = t % 60;
+      const hh = h < 100 ? pad2(h) : String(h);
+      return hh + ":" + pad2(m) + ":" + pad2(s);
+    }
 
-    if(totalSeconds <= 0){
-      totalSeconds = 0;
-      render();
+    function formatTimeForBox(totalSeconds) {
+      const t = Math.max(0, Math.floor(totalSeconds));
+      const h = Math.floor(t / 3600);
+      const m = Math.floor((t % 3600) / 60);
+      const s = t % 60;
+      const hh = h < 10 ? "0" + h : String(h);
+      return hh + ":" + pad2(m) + ":" + pad2(s);
+    }
 
-      if(notifyCb.checked){
-        playNotification();
+    function parseTimeToSeconds(raw) {
+      const s = String(raw || "").trim();
+      if (s === "") return { blank: true, seconds: 0 };
+
+      const parts = s.split(":").map((p) => p.trim()).filter((p) => p !== "");
+      if (parts.length === 0 || parts.length > 3) return { blank: false, seconds: 0, invalid: true };
+
+      for (let i = 0; i < parts.length; i++) {
+        if (!/^\d+$/.test(parts[i])) return { blank: false, seconds: 0, invalid: true };
       }
 
-      if(loopCb.checked){
-        const next = getTimeSeconds();
+      let h = 0;
+      let m = 0;
+      let sec = 0;
 
-        if(next > 0){
-          runningBaseSeconds = next;
-          runningStartAt = Date.now();
-          totalSeconds = next;
-          render();
-          snapshot("running");
-          return;
+      if (parts.length === 3) {
+        h = Number(parts[0]);
+        m = Number(parts[1]);
+        sec = Number(parts[2]);
+      } else if (parts.length === 2) {
+        m = Number(parts[0]);
+        sec = Number(parts[1]);
+      } else {
+        sec = Number(parts[0]);
+      }
+
+      h = Math.min(MAX_HOURS, Math.max(0, Math.floor(h)));
+      m = Math.min(MAX_MINUTES, Math.max(0, Math.floor(m)));
+      sec = Math.min(MAX_SECONDS, Math.max(0, Math.floor(sec)));
+
+      return { blank: false, seconds: h * 3600 + m * 60 + sec };
+    }
+
+    function normalizeTimeBox(el) {
+      const parsed = parseTimeToSeconds(el.value);
+      if (parsed.blank || parsed.invalid) {
+        el.value = "";
+        return 0;
+      }
+      el.value = formatTimeForBox(parsed.seconds);
+      return parsed.seconds;
+    }
+
+    function blockTimeTyping(el) {
+      el.addEventListener("keydown", (e) => {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        const okKeys = [
+          "Backspace", "Delete", "Tab", "Escape", "Enter",
+          "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"
+        ];
+        if (okKeys.includes(e.key)) return;
+
+        if (e.key >= "0" && e.key <= "9") return;
+        if (e.key === ":") return;
+
+        e.preventDefault();
+      });
+    }
+
+    function unlockAudioOnce() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) {
+          audioCtx = new Ctx();
+          audioCtx.resume().catch(() => {});
+          const buf = audioCtx.createBuffer(1, 1, 22050);
+          const src = audioCtx.createBufferSource();
+          src.buffer = buf;
+          src.connect(audioCtx.destination);
+          src.start(0);
+        }
+      } catch {}
+
+      try {
+        const a = new Audio(SOUND_URL);
+        a.preload = "auto";
+        a.volume = 0.001;
+        a.play().then(() => {
+          a.pause();
+          a.currentTime = 0;
+        }).catch(() => {});
+      } catch {}
+
+      ensureNotificationPermission();
+    }
+
+    document.addEventListener("pointerdown", unlockAudioOnce, { once: true });
+    document.addEventListener("keydown", unlockAudioOnce, { once: true });
+
+    function ensureNotificationPermission() {
+      if (!("Notification" in window)) return;
+      if (!window.isSecureContext) return;
+      if (Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+
+    function showBrowserNotification(title) {
+      if (!("Notification" in window)) return;
+      if (!window.isSecureContext) return;
+      if (Notification.permission !== "granted") return;
+
+      try {
+        new Notification(title);
+      } catch {}
+    }
+
+    function playNotificationSoundOnce() {
+      try {
+        const audio = new Audio(SOUND_URL);
+        audio.preload = "auto";
+        audio.volume = 0.75;
+        audio.play().catch(() => {});
+      } catch {}
+    }
+
+    function getNotifySettingsFixed() {
+      return { count: FIXED_NOTIFY_COUNT, delay: FIXED_NOTIFY_DELAY_SECONDS };
+    }
+
+    function getSessionKey() {
+      return STORAGE_KEY_BASE;
+    }
+
+    function getOrderKey() {
+      return getSessionKey() + "__order";
+    }
+
+    function loadOrder() {
+      const raw = localStorage.getItem(getOrderKey());
+      if (!raw) return null;
+
+      try {
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return null;
+        return arr.map(Number).filter((n) => Number.isFinite(n));
+      } catch {
+        return null;
+      }
+    }
+
+    function saveOrder(orderIds) {
+      localStorage.setItem(getOrderKey(), JSON.stringify(orderIds));
+    }
+
+    function applyOrder(itemsArr) {
+      const order = loadOrder();
+      if (!order || order.length === 0) return itemsArr;
+
+      const byId = new Map();
+      for (let i = 0; i < itemsArr.length; i++) {
+        byId.set(itemsArr[i].id, itemsArr[i]);
+      }
+
+      const out = [];
+      const used = new Set();
+
+      for (let i = 0; i < order.length; i++) {
+        const it = byId.get(order[i]);
+        if (it && !used.has(it.id)) {
+          out.push(it);
+          used.add(it.id);
         }
       }
 
-      pauseRunning();
+      for (let i = 0; i < itemsArr.length; i++) {
+        const it = itemsArr[i];
+        if (!used.has(it.id)) out.push(it);
+      }
+
+      return out;
     }
-  }
 
-  function startRunning(){
-    if(!hasStarted){
-      totalSeconds = getTimeSeconds();
+    function setCheckboxChecked(cb, checked) {
+      cb.checked = Boolean(checked);
+    }
 
-      if(totalSeconds <= 0){
-        runCb.checked = false;
+    function armOneShotCheckbox(cb, action) {
+      cb.addEventListener("change", () => {
+        if (!cb.checked) return;
+        action();
+        cb.checked = false;
+      });
+    }
+
+    function enableDragDrop(row, handleEl) {
+      if (!IS_COARSE_POINTER) {
+        handleEl.draggable = true;
+
+        handleEl.addEventListener("dragstart", (e) => {
+          draggingId = Number(row.dataset.itemId);
+          e.dataTransfer.effectAllowed = "move";
+
+          try {
+            e.dataTransfer.setDragImage(TRANSPARENT_IMG, 0, 0);
+          } catch {}
+        });
+
+        handleEl.addEventListener("dragend", () => {
+          draggingId = null;
+        });
+
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        });
+
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          if (draggingId === null) return;
+
+          const targetId = Number(row.dataset.itemId);
+          if (targetId === draggingId) return;
+
+          const draggingRow = timersContainer.querySelector(`.timer-row[data-item-id="${draggingId}"]`);
+          const targetRow = timersContainer.querySelector(`.timer-row[data-item-id="${targetId}"]`);
+          if (!draggingRow || !targetRow) return;
+
+          const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+          const dragIndex = rows.indexOf(draggingRow);
+          const targetIndex = rows.indexOf(targetRow);
+
+          if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
+          else timersContainer.insertBefore(draggingRow, targetRow);
+
+          saveOrderFromDOM();
+        });
+
         return;
       }
 
-      hasStarted = true;
-    }else{
-      if(totalSeconds <= 0){
-        runCb.checked = false;
-        return;
+      let draggingRow = null;
+      let pointerId = null;
+
+      function moveToTargetAtPoint(x, y) {
+        const el = document.elementFromPoint(x, y);
+        if (!el) return;
+
+        const targetRow = el.closest(".timer-row");
+        if (!targetRow) return;
+        if (!draggingRow || targetRow === draggingRow) return;
+
+        const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+        const dragIndex = rows.indexOf(draggingRow);
+        const targetIndex = rows.indexOf(targetRow);
+
+        if (dragIndex < 0 || targetIndex < 0) return;
+
+        if (dragIndex < targetIndex) timersContainer.insertBefore(draggingRow, targetRow.nextSibling);
+        else timersContainer.insertBefore(draggingRow, targetRow);
+      }
+
+      function onPointerMove(e) {
+        if (!draggingRow) return;
+        if (pointerId !== null && e.pointerId !== pointerId) return;
+        e.preventDefault();
+        moveToTargetAtPoint(e.clientX, e.clientY);
+      }
+
+      function endDrag(e) {
+        if (!draggingRow) return;
+        if (pointerId !== null && e.pointerId !== pointerId) return;
+
+        e.preventDefault();
+
+        try { handleEl.releasePointerCapture(pointerId); } catch {}
+
+        draggingRow = null;
+        pointerId = null;
+
+        handleEl.removeEventListener("pointermove", onPointerMove);
+        handleEl.removeEventListener("pointerup", endDrag);
+        handleEl.removeEventListener("pointercancel", endDrag);
+
+        saveOrderFromDOM();
+      }
+
+      handleEl.addEventListener("pointerdown", (e) => {
+        if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+
+        e.preventDefault();
+
+        draggingRow = row;
+        pointerId = e.pointerId;
+
+        try { handleEl.setPointerCapture(pointerId); } catch {}
+
+        handleEl.addEventListener("pointermove", onPointerMove, { passive: false });
+        handleEl.addEventListener("pointerup", endDrag, { passive: false });
+        handleEl.addEventListener("pointercancel", endDrag, { passive: false });
+      }, { passive: false });
+    }
+
+    function loadState() {
+      const raw = localStorage.getItem(getSessionKey());
+      if (!raw) return null;
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return null;
+        return parsed;
+      } catch {
+        return null;
       }
     }
 
-    runningBaseSeconds = totalSeconds;
-    runningStartAt = Date.now();
-
-    clearInterval(intervalId);
-    intervalId = setInterval(tick, 250);
-
-    snapshot("running");
-  }
-
-  function pauseRunning(){
-    if(runningStartAt !== 0){
-      totalSeconds = computeRunningSeconds();
+    function saveState(items) {
+      localStorage.setItem(getSessionKey(), JSON.stringify(items));
     }
 
-    clearInterval(intervalId);
-    intervalId = null;
-
-    runningBaseSeconds = totalSeconds;
-    runningStartAt = 0;
-    runCb.checked = false;
-
-    render();
-    snapshot(totalSeconds > 0 ? "paused" : "idle");
-  }
-
-  function reset(){
-    clearInterval(intervalId);
-    intervalId = null;
-
-    totalSeconds = 0;
-    hasStarted = false;
-    runningBaseSeconds = 0;
-    runningStartAt = 0;
-
-    runCb.checked = false;
-
-    render();
-    snapshot("idle");
-  }
-
-  nameInput.value = data.name || "";
-  timeInput.value = String(data.timeStr || "");
-  notifyCb.checked = Boolean(data.notifyEnabled);
-  loopCb.checked = Boolean(data.loopEnabled);
-
-  if(String(timeInput.value || "").trim() !== ""){
-    normalizeTimeBox(timeInput);
-  }
-
-  ensureInputShowsLeft(nameInput);
-  ensureInputShowsLeft(timeInput);
-
-  render();
-
-  nameInput.addEventListener("input", () => {
-    snapshot(intervalId !== null ? "running" : "idle");
-  });
-
-  timeInput.addEventListener("input", () => {
-    totalSeconds = 0;
-    hasStarted = false;
-    runningBaseSeconds = 0;
-    runningStartAt = 0;
-    runCb.checked = false;
-    clearInterval(intervalId);
-    intervalId = null;
-    render();
-    snapshot("idle");
-  });
-
-  timeInput.addEventListener("blur", () => {
-    normalizeTimeBox(timeInput);
-    ensureInputShowsLeft(timeInput);
-    snapshot(intervalId !== null ? "running" : "idle");
-  });
-
-  notifyCb.addEventListener("change", () => {
-    if(notifyCb.checked){
-      maybeRequestNotificationPermission();
+    function defaultItem(id) {
+      return {
+        id: id,
+        name: "",
+        timeStr: "",
+        totalSeconds: 0,
+        mode: "idle",
+        hasStarted: false,
+        notifyEnabled: false,
+        loopEnabled: false,
+        runningBaseSeconds: 0,
+        runningStartAt: 0
+      };
     }
-    snapshot(intervalId !== null ? "running" : "idle");
-  });
 
-  loopCb.addEventListener("change", () => {
-    snapshot(intervalId !== null ? "running" : "idle");
-  });
+    function clampSavedItem(item) {
+      const out = Object.assign(defaultItem(item.id), item);
 
-  runCb.addEventListener("change", () => {
-    if(runCb.checked) startRunning();
-    else pauseRunning();
-  });
+      if (!out.timeStr) {
+        if (out.aStr) out.timeStr = String(out.aStr);
+        else if (out.hA !== undefined || out.mA !== undefined || out.sA !== undefined) {
+          const h = Math.min(MAX_HOURS, Math.max(0, Number(out.hA || 0)));
+          const m = Math.min(MAX_MINUTES, Math.max(0, Number(out.mA || 0)));
+          const s = Math.min(MAX_SECONDS, Math.max(0, Number(out.sA || 0)));
+          if (h !== 0 || m !== 0 || s !== 0) out.timeStr = String(h) + ":" + pad2(m) + ":" + pad2(s);
+        }
+      }
 
-  resetCb.addEventListener("change", () => {
-    if(resetCb.checked){
-      reset();
-      resetCb.checked = false;
+      out.timeStr = String(out.timeStr || "");
+      out.notifyEnabled = Boolean(out.notifyEnabled);
+      out.loopEnabled = Boolean(out.loopEnabled);
+
+      return out;
     }
-  });
 
-  if(data.mode === "running" && data.runningStartAt && data.runningBaseSeconds){
-    runningBaseSeconds = Number(data.runningBaseSeconds || 0);
-    runningStartAt = Number(data.runningStartAt || Date.now());
-    totalSeconds = computeRunningSeconds();
+    function ensureState() {
+      const stored = loadState();
 
-    if(totalSeconds > 0){
-      runCb.checked = true;
-      clearInterval(intervalId);
-      intervalId = setInterval(tick, 250);
+      if (!stored) {
+        let fresh = [];
+        for (let i = 0; i < TIMER_COUNT; i++) {
+          fresh.push(defaultItem(i + 1));
+        }
+        fresh = applyOrder(fresh);
+        saveState(fresh);
+        return fresh;
+      }
+
+      const seen = new Set();
+      let out = [];
+
+      for (let i = 0; i < stored.length; i++) {
+        const it = stored[i];
+        if (!it || typeof it.id !== "number") continue;
+
+        const id = Number(it.id);
+        if (id < 1 || id > TIMER_COUNT) continue;
+        if (seen.has(id)) continue;
+
+        seen.add(id);
+        out.push(clampSavedItem(it));
+        if (out.length >= TIMER_COUNT) break;
+      }
+
+      for (let id = 1; id <= TIMER_COUNT; id++) {
+        if (out.length >= TIMER_COUNT) break;
+        if (!seen.has(id)) out.push(defaultItem(id));
+      }
+
+      out = applyOrder(out);
+      saveState(out);
+      return out;
+    }
+
+    let items = ensureState();
+
+    function getItemById(id) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === id) return items[i];
+      }
+      return null;
+    }
+
+    function upsertItem(item) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].id === item.id) {
+          items[i] = item;
+          saveState(items);
+          return;
+        }
+      }
+    }
+
+    function saveOrderFromDOM() {
+      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+      const newOrder = [];
+      const orderIds = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const id = Number(rows[i].dataset.itemId);
+        const item = getItemById(id);
+        if (item) {
+          newOrder.push(item);
+          orderIds.push(id);
+        }
+      }
+
+      items = newOrder;
+      saveOrder(orderIds);
+      saveState(items);
+    }
+
+    function saveAllFromDOM() {
+      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+
+      for (let i = 0; i < rows.length; i++) {
+        const id = Number(rows[i].dataset.itemId);
+        const item = getItemById(id);
+        if (!item) continue;
+
+        const nameInput = rows[i].querySelector(`#rName${id}`);
+        const timeInput = rows[i].querySelector(`#rTime${id}`);
+        const notifyCb = rows[i].querySelector(`#rNotify${id}`);
+        const loopCb = rows[i].querySelector(`#rLoop${id}`);
+
+        item.name = nameInput ? (nameInput.value || "") : (item.name || "");
+        item.timeStr = timeInput ? String(timeInput.value || "") : (item.timeStr || "");
+        item.notifyEnabled = Boolean(notifyCb && notifyCb.checked);
+        item.loopEnabled = Boolean(loopCb && loopCb.checked);
+      }
+
+      saveState(items);
+    }
+
+    document.addEventListener("input", (e) => {
+      const t = e.target;
+      if (!t) return;
+      if (t.classList && (t.classList.contains("timebox") || t.classList.contains("name"))) {
+        saveAllFromDOM();
+      }
+    }, true);
+
+    document.addEventListener("change", (e) => {
+      const t = e.target;
+      if (!t) return;
+      if (t.classList && (t.classList.contains("timebox") || t.classList.contains("name"))) {
+        saveAllFromDOM();
+      }
+    }, true);
+
+    window.addEventListener("pagehide", () => {
+      saveAllFromDOM();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      saveAllFromDOM();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) saveAllFromDOM();
+    });
+
+    function createTimerRow(data) {
+      const id = data.id;
+
+      const row = document.createElement("div");
+      row.className = "timer-row";
+      row.dataset.itemId = String(id);
+
+      row.innerHTML = `
+        <div class="display" id="rDisplay${id}">00:00:00</div>
+        <input class="name" id="rName${id}" type="text">
+        <input class="timebox" id="rTime${id}" type="text" inputmode="numeric" placeholder="">
+        <input class="cb" id="rReset${id}" type="checkbox">
+        <input class="cb" id="rRun${id}" type="checkbox">
+        <input class="cb" id="rNotify${id}" type="checkbox">
+        <input class="cb" id="rLoop${id}" type="checkbox">
+      `;
+
+      timersContainer.appendChild(row);
+
+      const display = document.getElementById(`rDisplay${id}`);
+      enableDragDrop(row, display);
+
+      const nameInput = document.getElementById(`rName${id}`);
+      const timeInput = document.getElementById(`rTime${id}`);
+      const resetCb = document.getElementById(`rReset${id}`);
+      const runCb = document.getElementById(`rRun${id}`);
+      const notifyCb = document.getElementById(`rNotify${id}`);
+      const loopCb = document.getElementById(`rLoop${id}`);
+
+      blockTimeTyping(timeInput);
+
+      let totalSeconds = Number(data.totalSeconds || 0);
+      let intervalId = null;
+      let hasStarted = Boolean(data.hasStarted);
+      let runningBaseSeconds = Number(data.runningBaseSeconds || 0);
+      let runningStartAt = Number(data.runningStartAt || 0);
+      let soundTimeoutIds = [];
+      let alive = true;
+
+      function render() {
+        display.textContent = formatHMSFixed(totalSeconds);
+      }
+
+      function clearAllSoundTimers() {
+        for (let i = 0; i < soundTimeoutIds.length; i++) clearTimeout(soundTimeoutIds[i]);
+        soundTimeoutIds = [];
+      }
+
+      function scheduleNotificationSounds() {
+        clearAllSoundTimers();
+
+        const ns = getNotifySettingsFixed();
+        for (let i = 0; i < ns.count; i++) {
+          const ms = Math.round(i * ns.delay * 1000);
+          const t = setTimeout(() => {
+            if (!alive) return;
+            playNotificationSoundOnce();
+          }, ms);
+          soundTimeoutIds.push(t);
+        }
+      }
+
+      function getNotificationTitle() {
+        const rawName = String(nameInput.value || "").trim();
+        if (rawName === "") return "Timer";
+        return rawName;
+      }
+
+      function notifyBrowserFinished() {
+        const title = getNotificationTitle();
+        showBrowserNotification(title);
+      }
+
+      function computeRunningSeconds() {
+        const elapsed = Math.floor((Date.now() - runningStartAt) / 1000);
+        return Math.max(0, runningBaseSeconds - elapsed);
+      }
+
+      function getTimeSeconds() {
+        const p = parseTimeToSeconds(timeInput.value);
+        if (p.blank || p.invalid) return 0;
+        return p.seconds;
+      }
+
+      function snapshot(mode) {
+        const item = getItemById(id);
+        if (!alive || !item) return;
+
+        item.name = nameInput.value || "";
+        item.timeStr = String(timeInput.value || "");
+        item.notifyEnabled = notifyCb.checked;
+        item.loopEnabled = loopCb.checked;
+        item.totalSeconds = totalSeconds;
+        item.mode = mode;
+        item.hasStarted = hasStarted;
+        item.runningBaseSeconds = runningBaseSeconds;
+        item.runningStartAt = runningStartAt;
+
+        upsertItem(item);
+      }
+
+      function stopInterval() {
+        if (intervalId !== null) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+      }
+
+      function stopToIdle() {
+        stopInterval();
+        setCheckboxChecked(runCb, false);
+        hasStarted = false;
+        runningBaseSeconds = 0;
+        runningStartAt = 0;
+        snapshot("idle");
+      }
+
+      function tick() {
+        if (!alive) return;
+
+        totalSeconds = computeRunningSeconds();
+        render();
+        snapshot("running");
+
+        if (totalSeconds <= 0) {
+          totalSeconds = 0;
+          render();
+
+          if (notifyCb.checked) {
+            ensureNotificationPermission();
+            scheduleNotificationSounds();
+            notifyBrowserFinished();
+          }
+
+          if (loopCb.checked) {
+            const next = getTimeSeconds();
+            if (next > 0) {
+              runningBaseSeconds = next;
+              runningStartAt = Date.now();
+              totalSeconds = next;
+              render();
+              snapshot("running");
+              return;
+            }
+          }
+
+          stopToIdle();
+        }
+      }
+
+      function startRunning() {
+        stopInterval();
+        clearAllSoundTimers();
+        unlockAudioOnce();
+
+        if (!hasStarted) {
+          totalSeconds = getTimeSeconds();
+
+          if (totalSeconds <= 0) {
+            setCheckboxChecked(runCb, false);
+            return;
+          }
+
+          hasStarted = true;
+        } else {
+          if (totalSeconds <= 0) {
+            setCheckboxChecked(runCb, false);
+            return;
+          }
+        }
+
+        runningBaseSeconds = totalSeconds;
+        runningStartAt = Date.now();
+
+        setCheckboxChecked(runCb, true);
+        snapshot("running");
+
+        intervalId = setInterval(tick, 250);
+      }
+
+      function pauseRunning() {
+        totalSeconds = computeRunningSeconds();
+        stopInterval();
+        clearAllSoundTimers();
+
+        setCheckboxChecked(runCb, false);
+
+        runningBaseSeconds = totalSeconds;
+        runningStartAt = 0;
+
+        render();
+        snapshot("paused");
+      }
+
+      function reset() {
+        stopInterval();
+        clearAllSoundTimers();
+
+        totalSeconds = 0;
+        render();
+
+        setCheckboxChecked(runCb, false);
+        hasStarted = false;
+        runningBaseSeconds = 0;
+        runningStartAt = 0;
+
+        snapshot("idle");
+      }
+
+      function onInputsChangedIdle() {
+        if (intervalId !== null) return;
+
+        clearAllSoundTimers();
+        totalSeconds = 0;
+        render();
+
+        setCheckboxChecked(runCb, false);
+        hasStarted = false;
+        runningBaseSeconds = 0;
+        runningStartAt = 0;
+
+        snapshot("idle");
+      }
+
+      nameInput.value = data.name || "";
+      timeInput.value = String(data.timeStr || "");
+
+      if (String(timeInput.value || "").trim() !== "") normalizeTimeBox(timeInput);
+
+      setCheckboxChecked(notifyCb, Boolean(data.notifyEnabled));
+      setCheckboxChecked(loopCb, Boolean(data.loopEnabled));
+
       render();
-    }else{
-      pauseRunning();
+
+      runCb.addEventListener("change", () => {
+        if (runCb.checked) startRunning();
+        else pauseRunning();
+      });
+
+      armOneShotCheckbox(resetCb, reset);
+
+      notifyCb.addEventListener("change", () => {
+        if (notifyCb.checked) ensureNotificationPermission();
+        snapshot(intervalId !== null ? "running" : "idle");
+      });
+
+      loopCb.addEventListener("change", () => {
+        snapshot(intervalId !== null ? "running" : "idle");
+      });
+
+      nameInput.addEventListener("input", () => snapshot(intervalId !== null ? "running" : "idle"));
+
+      timeInput.addEventListener("input", onInputsChangedIdle);
+      timeInput.addEventListener("change", onInputsChangedIdle);
+      timeInput.addEventListener("keyup", onInputsChangedIdle);
+      timeInput.addEventListener("paste", onInputsChangedIdle);
+      timeInput.addEventListener("cut", onInputsChangedIdle);
+
+      timeInput.addEventListener("blur", () => {
+        normalizeTimeBox(timeInput);
+        snapshot(intervalId !== null ? "running" : "idle");
+      });
+
+      if (data.mode === "running" && typeof data.runningStartAt === "number" && typeof data.runningBaseSeconds === "number") {
+        runningBaseSeconds = Number(data.runningBaseSeconds || 0);
+        runningStartAt = Number(data.runningStartAt || Date.now());
+
+        totalSeconds = computeRunningSeconds();
+        render();
+
+        setCheckboxChecked(runCb, true);
+        intervalId = setInterval(tick, 250);
+      } else {
+        setCheckboxChecked(runCb, false);
+      }
+
+      snapshot(data.mode || "idle");
+
+      row._cleanup = () => {
+        alive = false;
+        if (intervalId !== null) clearInterval(intervalId);
+        for (let i = 0; i < soundTimeoutIds.length; i++) clearTimeout(soundTimeoutIds[i]);
+        soundTimeoutIds = [];
+      };
     }
-  }else if(data.mode === "paused"){
-    totalSeconds = Number(data.totalSeconds || 0);
-    runningBaseSeconds = totalSeconds;
-    runningStartAt = 0;
-    hasStarted = totalSeconds > 0;
-    render();
-  }else{
-    totalSeconds = Number(data.totalSeconds || 0);
-    render();
-  }
-}
 
-function saveAllFromDOM(){
-  const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+    function teardownAllRows() {
+      const rows = Array.from(timersContainer.querySelectorAll(".timer-row"));
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i]._cleanup) rows[i]._cleanup();
+      }
+      timersContainer.innerHTML = "";
+    }
 
-  for(let i = 0; i < rows.length; i++){
-    const id = Number(rows[i].dataset.itemId);
-    const item = getItemById(id);
-    if(!item) continue;
+    function renderAllTimers() {
+      teardownAllRows();
+      items = ensureState();
 
-    const nameInput = rows[i].querySelector(`#rName${id}`);
-    const timeInput = rows[i].querySelector(`#rTime${id}`);
-    const notifyCb = rows[i].querySelector(`#rNotify${id}`);
-    const loopCb = rows[i].querySelector(`#rLoop${id}`);
+      for (let i = 0; i < items.length; i++) {
+        createTimerRow(items[i]);
+      }
+    }
 
-    item.name = nameInput ? (nameInput.value || "") : item.name;
-    item.timeStr = timeInput ? String(timeInput.value || "") : item.timeStr;
-    item.notifyEnabled = Boolean(notifyCb && notifyCb.checked);
-    item.loopEnabled = Boolean(loopCb && loopCb.checked);
-  }
+    renderAllTimers();
 
-  saveState(items);
-}
+    forceScrollLeft();
 
-function renderAllTimers(){
-  timersContainer.innerHTML = "";
+    requestAnimationFrame(() => {
+      forceScrollLeft();
+    });
 
-  for(let i = 0; i < items.length; i++){
-    createTimerRow(items[i]);
-  }
-}
+    setTimeout(() => {
+      forceScrollLeft();
+    }, 0);
 
-document.addEventListener("input", (e) => {
-  const t = e.target;
-  if(!t) return;
+    window.addEventListener("load", () => {
+      forceScrollLeft();
+    });
 
-  if(t.classList && (t.classList.contains("name") || t.classList.contains("timebox"))){
-    saveAllFromDOM();
-  }
-}, true);
-
-document.addEventListener("change", (e) => {
-  const t = e.target;
-  if(!t) return;
-
-  if(t.classList && (t.classList.contains("name") || t.classList.contains("timebox") || t.classList.contains("cb"))){
-    saveAllFromDOM();
-  }
-}, true);
-
-window.addEventListener("beforeunload", () => {
-  saveAllFromDOM();
-});
-
-window.addEventListener("pagehide", () => {
-  saveAllFromDOM();
-});
-
-document.addEventListener("visibilitychange", () => {
-  if(document.hidden){
-    saveAllFromDOM();
-  }
-});
-
-renderAllTimers();
-</script>
+    window.addEventListener("pageshow", () => {
+      forceScrollLeft();
+    });
+  </script>
 
 </body>
 </html>
